@@ -1,7 +1,7 @@
 import { getProviderConnections, validateApiKey, updateProviderConnection, getSettings } from "@/lib/localDb";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
-import { formatRetryAfter, checkFallbackError, isModelLockActive, buildModelLockUpdate, getEarliestModelLockUntil } from "open-sse/services/accountFallback.js";
-import { MAX_RATE_LIMIT_COOLDOWN_MS } from "open-sse/config/errorConfig.js";
+import { formatRetryAfter, checkFallbackError, isModelLockActive, buildModelLockUpdate, buildClearModelLocksUpdate, getEarliestModelLockUntil, MODEL_LOCK_PREFIX } from "open-sse/services/accountFallback.js";
+import { MAX_RATE_LIMIT_COOLDOWN_MS, getNextUtcMidnightMs } from "open-sse/config/errorConfig.js";
 import { resolveProviderId, FREE_PROVIDERS } from "@/shared/constants/providers.js";
 import * as log from "../utils/logger.js";
 
@@ -156,6 +156,38 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
       connection = availableConnections[0];
     }
 
+    // Lazy cleanup: clear expired modelLock_* keys on the selected connection.
+    // Prevents stale locks from accumulating when clearAccountError never fires
+    // (e.g. transient 429 lock expires but no subsequent successful request).
+    const now = Date.now();
+    const allLockKeys = Object.keys(connection).filter(k => k.startsWith(MODEL_LOCK_PREFIX));
+    const expiredLockKeys = allLockKeys.filter(k => {
+      const expiry = connection[k];
+      return expiry && new Date(expiry).getTime() <= now;
+    });
+    const activeLockKeys = allLockKeys.filter(k => {
+      if (expiredLockKeys.includes(k)) return false;
+      const expiry = connection[k];
+      return expiry && new Date(expiry).getTime() > now;
+    });
+    if (expiredLockKeys.length > 0) {
+      const clearObj = Object.fromEntries(expiredLockKeys.map(k => [k, null]));
+      // Only reset error state if no active locks remain
+      if (activeLockKeys.length === 0) {
+        Object.assign(clearObj, { testStatus: "active", lastError: null, lastErrorAt: null, backoffLevel: 0 });
+      }
+      // Fire-and-forget: don't block the request on cleanup
+      updateProviderConnection(connection.id, clearObj).catch(() => {});
+      // Update in-memory copy so the returned credentials reflect the cleanup
+      expiredLockKeys.forEach(k => { connection[k] = null; });
+      if (activeLockKeys.length === 0) {
+        connection.testStatus = "active";
+        connection.lastError = null;
+        connection.lastErrorAt = null;
+        connection.backoffLevel = 0;
+      }
+    }
+
     const resolvedProxy = await resolveConnectionProxyConfig(connection.providerSpecificData || {});
 
     return {
@@ -200,17 +232,33 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
  * @param {string|null} model - The specific model that triggered the error
  * @returns {{ shouldFallback: boolean, cooldownMs: number }}
  */
-export async function markAccountUnavailable(connectionId, status, errorText, provider = null, model = null, resetsAtMs = null) {
+export async function markAccountUnavailable(connectionId, status, errorText, provider = null, model = null, resetsAtMs = null, upstreamCode = null) {
   if (!connectionId || connectionId === "noauth") return { shouldFallback: false, cooldownMs: 0 };
   const connections = await getProviderConnections({ provider });
   const conn = connections.find(c => c.id === connectionId);
   const backoffLevel = conn?.backoffLevel || 0;
 
+  // Ordinary Cloudflare transient 429 (e.g. "Capacity temporarily exceeded"): brief per-model cooldown.
+  const CF_TRANSIENT_429_COOLDOWN_MS = 2 * 60 * 1000;
+
   // Provider-specific precise cooldown (e.g. codex usage_limit_reached resets_at) overrides backoff
-  let shouldFallback, cooldownMs, newBackoffLevel;
-  if (resetsAtMs && resetsAtMs > Date.now()) {
+  let shouldFallback, cooldownMs, newBackoffLevel, lockModel = model;
+  // Cloudflare Workers AI daily neuron quota exhausted (code 4006, or legacy "used up / daily free
+  // allocation" wording) -> lock whole account until next UTC midnight. Text kept as fallback only.
+  if (provider === "cloudflare-ai" && status === 429 &&
+      (upstreamCode === 4006 || /used up|daily free allocation/i.test(errorText))) {
+    shouldFallback = true;
+    cooldownMs = getNextUtcMidnightMs() - Date.now();
+    newBackoffLevel = 0;
+    lockModel = null;
+  } else if (resetsAtMs && resetsAtMs > Date.now()) {
     shouldFallback = true;
     cooldownMs = Math.min(resetsAtMs - Date.now(), MAX_RATE_LIMIT_COOLDOWN_MS);
+    newBackoffLevel = 0;
+  } else if (provider === "cloudflare-ai" && status === 429) {
+    // Other Cloudflare 429s: rotate away briefly, auto-recover when the per-model lock expires.
+    shouldFallback = true;
+    cooldownMs = CF_TRANSIENT_429_COOLDOWN_MS;
     newBackoffLevel = 0;
   } else {
     ({ shouldFallback, cooldownMs, newBackoffLevel } = checkFallbackError(status, errorText, backoffLevel));
@@ -218,7 +266,7 @@ export async function markAccountUnavailable(connectionId, status, errorText, pr
   if (!shouldFallback) return { shouldFallback: false, cooldownMs: 0 };
 
   const reason = typeof errorText === "string" ? errorText.slice(0, 100) : "Provider error";
-  const lockUpdate = buildModelLockUpdate(model, cooldownMs);
+  const lockUpdate = buildModelLockUpdate(lockModel, cooldownMs);
 
   await updateProviderConnection(connectionId, {
     ...lockUpdate,

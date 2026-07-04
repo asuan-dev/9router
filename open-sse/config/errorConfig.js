@@ -82,4 +82,13 @@ export const COOLDOWN_MS = {
   notFound: COOLDOWN.long,
   transient: TRANSIENT_COOLDOWN_MS,
   requestNotAllowed: COOLDOWN.short,
-};
+ };
+
+/**
+ * Next 00:00 UTC timestamp in ms.
+ * Cloudflare Workers AI free quota resets daily at 00:00 UTC.
+ */
+export function getNextUtcMidnightMs() {
+  const now = new Date();
+  return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0);
+}

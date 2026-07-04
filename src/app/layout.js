@@ -1,4 +1,3 @@
-import { Inter } from "next/font/google";
 import { GoogleAnalytics } from "@next/third-parties/google";
 import "material-symbols/outlined.css";
 import "./globals.css";
@@ -11,10 +10,9 @@ import { RuntimeI18nProvider } from "@/i18n/RuntimeI18nProvider";
 // Hook console immediately at module load time (server-side only, runs once)
 initConsoleLogCapture();
 
-const inter = Inter({
-  subsets: ["latin"],
-  variable: "--font-inter",
-});
+// Self-hosted/offline build: avoid next/font/google network fetch at compile time.
+// Keep the --font-inter CSS hook intact; UI falls back to the `font-sans` (system) stack.
+const inter = { variable: "--font-inter" };
 
 export const metadata = {
   title: "9Router - AI Infrastructure Management",

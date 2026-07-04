@@ -69,15 +69,19 @@ export async function parseUpstreamError(response, executor = null) {
       const parsed = executor.parseError(response, bodyText);
       if (parsed && typeof parsed === "object") {
         const msg = parsed.message || DEFAULT_ERROR_MESSAGES[response.status] || `Upstream error: ${response.status}`;
-        return { statusCode: parsed.status || response.status, message: msg, resetsAtMs: parsed.resetsAtMs };
+        return { statusCode: parsed.status || response.status, message: msg, resetsAtMs: parsed.resetsAtMs, upstreamCode: parsed.code ?? null };
       }
     } catch { /* fall through to default parsing */ }
   }
 
   let message = "";
+  let upstreamCode = null;
   try {
     const json = JSON.parse(bodyText);
     message = json.error?.message || json.message || json.error || bodyText;
+    if (Array.isArray(json.errors) && json.errors[0]?.code != null) upstreamCode = json.errors[0].code;
+    else if (json.error?.code != null) upstreamCode = json.error.code;
+    else if (json.code != null) upstreamCode = json.code;
   } catch {
     message = bodyText;
   }
@@ -85,7 +89,7 @@ export async function parseUpstreamError(response, executor = null) {
   const messageStr = typeof message === "string" ? message : JSON.stringify(message);
   const finalMessage = messageStr || DEFAULT_ERROR_MESSAGES[response.status] || `Upstream error: ${response.status}`;
 
-  return { statusCode: response.status, message: finalMessage };
+  return { statusCode: response.status, message: finalMessage, upstreamCode };
 }
 
 /**
@@ -95,12 +99,13 @@ export async function parseUpstreamError(response, executor = null) {
  * @param {number} [resetsAtMs] - Optional precise cooldown expiry (ms epoch) for provider-specific quota errors
  * @returns {{ success: false, status: number, error: string, response: Response, resetsAtMs?: number }}
  */
-export function createErrorResult(statusCode, message, resetsAtMs) {
+export function createErrorResult(statusCode, message, resetsAtMs, upstreamCode = null) {
   return {
     success: false,
     status: statusCode,
     error: message,
     resetsAtMs,
+    upstreamCode,
     response: errorResponse(statusCode, message)
   };
 }

@@ -87,11 +87,12 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
   // Use useState + useEffect for impure Date.now() to avoid calling during render
   const [isCooldown, setIsCooldown] = useState(false);
 
-  // Get earliest model lock timestamp (useEffect handles the Date.now() comparison)
+  // Get earliest ACTIVE (non-expired) model lock timestamp
+  const now = Date.now();
   const modelLockUntil = Object.entries(connection)
     .filter(([k]) => k.startsWith("modelLock_"))
     .map(([, v]) => v)
-    .filter(v => !!v)
+    .filter(v => v && new Date(v).getTime() > now)
     .sort()[0] || null;
 
   useEffect(() => {
@@ -176,7 +177,7 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
               </Badge>
             )}
             {isCooldown && connection.isActive !== false && <CooldownTimer until={modelLockUntil} />}
-            {connection.lastError && connection.isActive !== false && (
+            {connection.lastError && connection.isActive !== false && isCooldown && (
               <span className="max-w-full truncate text-xs text-red-500 sm:max-w-[300px]" title={connection.lastError}>
                 {connection.lastError}
               </span>
