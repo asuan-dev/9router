@@ -75,6 +75,10 @@ export async function GET(request, { params }) {
     delete result.accessToken;
     delete result.refreshToken;
     delete result.idToken;
+    if (result.providerSpecificData?.phone) {
+      const { phone, ...restPsd } = result.providerSpecificData;
+      result.providerSpecificData = restPsd;
+    }
 
     return NextResponse.json({ connection: result });
   } catch (error) {
@@ -163,6 +167,10 @@ export async function PUT(request, { params }) {
     delete result.accessToken;
     delete result.refreshToken;
     delete result.idToken;
+    if (result.providerSpecificData?.phone) {
+      const { phone, ...restPsd } = result.providerSpecificData;
+      result.providerSpecificData = restPsd;
+    }
 
     return NextResponse.json({ connection: result });
   } catch (error) {

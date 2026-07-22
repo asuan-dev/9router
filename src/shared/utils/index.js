@@ -2,6 +2,12 @@
 export { cn } from "./cn";
 export * as api from "./api";
 export { getProviderIconSrc, markProviderIconMissing, resolveProviderIconId } from "./providerIcon";
+export {
+  maskMiddle4,
+  decodeJwtPayloadSafe,
+  looksLikePhone,
+  extractCodebuddyProfileFromToken,
+} from "./codebuddyProfile";
 
 import { v4 as uuidv4 } from "uuid";
 

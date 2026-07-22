@@ -30,6 +30,8 @@ const AUTO_PING_SETTINGS_KEYS = {
   codex: "codexAutoPing",
 };
 
+const AUTO_CHECKIN_SETTINGS_KEY = "codebuddyAutoCheckin";
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -66,6 +68,8 @@ export default function ProviderDetailPage() {
   const [providerStickyLimit, setProviderStickyLimit] = useState("");
   const [thinkingMode, setThinkingMode] = useState("auto");
   const [autoPing, setAutoPing] = useState({ enabled: false, connections: {} });
+  const [autoCheckinEnabled, setAutoCheckinEnabled] = useState(false);
+  const [refreshingAllProfiles, setRefreshingAllProfiles] = useState(false);
   const [suggestedModels, setSuggestedModels] = useState([]);
   const [liveModels, setLiveModels] = useState([]);
   const [kiloFreeModels, setKiloFreeModels] = useState([]);
@@ -318,6 +322,16 @@ export default function ProviderDetailPage() {
       const autoPingSettingsKey = AUTO_PING_SETTINGS_KEYS[providerId];
       const apCfg = autoPingSettingsKey ? settingsData[autoPingSettingsKey] || {} : {};
       setAutoPing({ enabled: apCfg.enabled === true, connections: apCfg.connections || {} });
+      if (providerId === "codebuddy-cn") {
+        const acCfg = settingsData[AUTO_CHECKIN_SETTINGS_KEY] || {};
+        const on =
+          typeof acCfg.enabled === "boolean"
+            ? acCfg.enabled === true
+            : Object.values(acCfg.connections || {}).some(Boolean);
+        setAutoCheckinEnabled(on);
+      } else {
+        setAutoCheckinEnabled(false);
+      }
       if (nodesRes.ok) {
         let node = (nodesData.nodes || []).find((entry) => entry.id === providerId) || null;
 
@@ -450,12 +464,97 @@ export default function ProviderDetailPage() {
     saveAutoPing({ ...autoPing, connections: { ...autoPing.connections, [connectionId]: on } });
   };
 
+  const saveAutoCheckinEnabled = async (on) => {
+    if (providerId !== "codebuddy-cn") return;
+    setAutoCheckinEnabled(on);
+    try {
+      // Single boolean in settings JSON (same settings row/table as author).
+      // Drop legacy per-id map by writing only { enabled }.
+      await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [AUTO_CHECKIN_SETTINGS_KEY]: { enabled: on } }),
+      });
+    } catch (error) {
+      console.log("Error saving auto-checkin config:", error);
+    }
+  };
+
+  const handleAutoCheckinGlobal = (on) => {
+    if (providerId !== "codebuddy-cn") return;
+    saveAutoCheckinEnabled(!!on);
+  };
+
+  const handleRefreshProfile = async (connectionId) => {
+    try {
+      const res = await fetch(`/api/providers/${connectionId}/refresh-profile`, {
+        method: "POST",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        console.log("Error refreshing profile:", data?.error || res.status);
+        return;
+      }
+      if (data.connection) {
+        setConnections((prev) =>
+          prev.map((c) => (c.id === connectionId ? { ...c, ...data.connection } : c)),
+        );
+      } else {
+        await fetchConnections();
+      }
+    } catch (error) {
+      console.log("Error refreshing profile:", error);
+    }
+  };
+
+  const handleRefreshAllProfiles = async () => {
+    if (providerId !== "codebuddy-cn" || refreshingAllProfiles) return;
+    const targets = connections.filter((c) => c.authType === "oauth");
+    if (targets.length === 0) return;
+    setRefreshingAllProfiles(true);
+    try {
+      for (const conn of targets) {
+        await handleRefreshProfile(conn.id);
+      }
+    } finally {
+      setRefreshingAllProfiles(false);
+    }
+  };
+
+
   useEffect(() => {
     fetchConnections();
     fetchAliases();
     fetchCustomModels();
     fetchDisabledModels();
   }, [fetchConnections, fetchAliases, fetchCustomModels, fetchDisabledModels]);
+
+  // Event-driven badge update: only when scheduler gets an upstream check-in response.
+  useEffect(() => {
+    if (providerId !== "codebuddy-cn") return undefined;
+    const es = new EventSource("/api/providers/codebuddy-checkin/stream");
+    es.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (!data?.connectionId || !data?.providerSpecificData) return;
+        setConnections((prev) =>
+          prev.map((c) => {
+            if (c.id !== data.connectionId) return c;
+            return {
+              ...c,
+              providerSpecificData: {
+                ...(c.providerSpecificData || {}),
+                ...data.providerSpecificData,
+              },
+            };
+          }),
+        );
+      } catch {
+        // ignore malformed keepalive/noise
+      }
+    };
+    return () => es.close();
+  }, [providerId]);
 
   // Cursor's model availability is account-specific and changes frequently.
   // Load the active account's live catalog for the dashboard; the static
@@ -815,6 +914,7 @@ export default function ProviderDetailPage() {
       console.log("Error updating connection status:", error);
     }
   };
+
 
   const handleSwapPriority = async (index1, index2) => {
     // Optimistic update state
@@ -1467,6 +1567,17 @@ export default function ProviderDetailPage() {
                   )}
                 </>
               )}
+              {providerId === "codebuddy-cn" && connections.some((c) => c.authType === "oauth") && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  icon={refreshingAllProfiles ? "progress_activity" : "sync"}
+                  onClick={handleRefreshAllProfiles}
+                  disabled={refreshingAllProfiles}
+                >
+                  {refreshingAllProfiles ? "刷新中..." : "全部刷新"}
+                </Button>
+              )}
               {/* Round Robin toggle */}
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs text-text-muted font-medium">Round Robin</span>
@@ -1488,6 +1599,16 @@ export default function ProviderDetailPage() {
                   </div>
                 )}
               </div>
+              {providerId === "codebuddy-cn" && connections.some((c) => c.authType === "oauth") && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs text-text-muted font-medium">签到</span>
+                  <Toggle
+                    checked={autoCheckinEnabled}
+                    onChange={handleAutoCheckinGlobal}
+                    title="开启后：全部 CodeBuddy CN OAuth 账号每日自动签到；关闭则全部不签"
+                  />
+                </div>
+              )}
             </div>
           </div>
 

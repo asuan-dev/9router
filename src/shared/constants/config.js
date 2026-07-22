@@ -92,6 +92,17 @@ export const QUOTA_AUTOPING_CONFIG = {
   },
 };
 
+// CodeBuddy CN daily auto check-in (Buddy 加油站)
+// Once per Asia/Shanghai day; staggered after midnight; sparse retries.
+export const CODEBUDDY_AUTO_CHECKIN_CONFIG = {
+  settingsKey: "codebuddyAutoCheckin",
+  tickIntervalMs: 60 * 1000, // wake scheduler; real work only when due
+  staggerMs: 3 * 60 * 60 * 1000, // spread first try across 00:00–03:00 Shanghai
+  retryMs: 10 * 60 * 1000, // after fail, wait 10 min
+  maxFailsPerDay: 6, // stop hammering (~1h of retries)
+  betweenAccountsMs: 1500, // gap when multiple accounts due in same tick
+};
+
 // Re-export from providers.js for backward compatibility
 export {
   FREE_PROVIDERS,

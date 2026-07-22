@@ -112,11 +112,24 @@ async function runHeavyStartup() {
       .then(({ startQuotaAutoPing }) => startQuotaAutoPing())
       .catch((e) => console.log("[AutoPing] scheduler start failed:", e.message));
   }
+
+  if (hasCodebuddyAutoCheckinEnabled(settings)) {
+    import("@/shared/services/codebuddyAutoCheckin")
+      .then(({ startCodebuddyAutoCheckin }) => startCodebuddyAutoCheckin())
+      .catch((e) => console.log("[CODEBUDDY_CHECKIN] scheduler start failed:", e.message));
+  }
 }
 
 function hasQuotaAutoPingEnabled(settings) {
   return [settings?.claudeAutoPing, settings?.codexAutoPing]
     .some((config) => Object.values(config?.connections || {}).some(Boolean));
+}
+
+function hasCodebuddyAutoCheckinEnabled(settings) {
+  const cfg = settings?.codebuddyAutoCheckin;
+  if (!cfg || typeof cfg !== "object") return false;
+  if (typeof cfg.enabled === "boolean") return cfg.enabled === true;
+  return Object.values(cfg.connections || {}).some(Boolean);
 }
 
 async function autoStartMitm(settings) {

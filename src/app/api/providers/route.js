@@ -66,9 +66,16 @@ export async function GET() {
       const name = isCompatible
         ? (c.name || nodeNameMap[c.provider] || c.providerSpecificData?.nodeName || c.provider)
         : c.name;
+      let providerSpecificData = c.providerSpecificData;
+      // Never send full phone numbers to the dashboard list
+      if (providerSpecificData?.phone) {
+        const { phone, ...restPsd } = providerSpecificData;
+        providerSpecificData = restPsd;
+      }
       return {
         ...c,
         name,
+        providerSpecificData,
         apiKey: undefined,
         accessToken: undefined,
         refreshToken: undefined,

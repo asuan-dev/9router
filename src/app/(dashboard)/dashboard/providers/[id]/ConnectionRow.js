@@ -6,7 +6,21 @@ import PropTypes from "prop-types";
 import { Badge, Toggle, Tooltip } from "@/shared/components";
 import CooldownTimer from "./CooldownTimer";
 
-export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst, isLast, onMoveUp, onMoveDown, onToggleActive, onUpdateProxy, onEdit, onDelete, oneByOneStatus = null, autoPing = null }) {
+export default function ConnectionRow({
+  connection,
+  proxyPools,
+  isOAuth,
+  isFirst,
+  isLast,
+  onMoveUp,
+  onMoveDown,
+  onToggleActive,
+  onUpdateProxy,
+  onEdit,
+  onDelete,
+  oneByOneStatus = null,
+  autoPing = null,
+}) {
   const [showProxyDropdown, setShowProxyDropdown] = useState(false);
   const [updatingProxy, setUpdatingProxy] = useState(false);
   const proxyDropdownRef = useRef(null);
@@ -74,6 +88,48 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
   const isCookieConnection = rowAuthType === "cookie";
   const authIcon = isCookieConnection ? "cookie" : isOAuthConnection ? "lock" : "key";
   const authLabel = isOAuthConnection ? "OAuth" : isCookieConnection ? "Cookie" : "API Key";
+  const isCodebuddyCnOauth =
+    connection.provider === "codebuddy-cn" && isOAuthConnection;
+  const phoneMasked =
+    (typeof connection.providerSpecificData?.phoneMasked === "string"
+      && connection.providerSpecificData.phoneMasked.trim())
+    || null;
+  // Badge: gray until today's successful check-in is recorded (Shanghai day).
+  // Green only for success/already today; red only for fail today before done.
+  const shanghaiDayKey = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+  const checkinPsd = connection.providerSpecificData || {};
+  const checkinLastResult = checkinPsd.autoCheckinLastResult || null;
+  const checkinDoneToday =
+    checkinPsd.autoCheckinDoneDay === shanghaiDayKey
+    && (checkinLastResult === "success" || checkinLastResult === "already");
+  const checkinFailedToday =
+    !checkinDoneToday
+    && checkinLastResult === "fail"
+    && (
+      checkinPsd.autoCheckinPlanDay === shanghaiDayKey
+      || (checkinPsd.autoCheckinLastAt
+        && new Intl.DateTimeFormat("en-CA", {
+          timeZone: "Asia/Shanghai",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        }).format(new Date(checkinPsd.autoCheckinLastAt)) === shanghaiDayKey)
+    );
+  const checkinBadgeVariant = checkinDoneToday
+    ? "success"
+    : checkinFailedToday
+      ? "error"
+      : "default";
+  const checkinBadgeTitle = checkinDoneToday
+    ? (checkinPsd.autoCheckinLastMessage || "已签到")
+    : checkinFailedToday
+      ? (checkinPsd.autoCheckinLastMessage || "签到失败")
+      : "未签到";
   const displayName = connection.name?.trim()
     || connection.email?.trim()
     || connection.displayName?.trim()
@@ -111,10 +167,9 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
       if (interval) clearInterval(interval);
     };
   }, [modelLockUntil]);
-
   // Determine effective status (override unavailable if cooldown expired)
   const effectiveStatus = (connection.testStatus === "unavailable" && !isCooldown)
-    ? "active"  // Cooldown expired u2192 treat as active
+    ? "active"  // Cooldown expired → treat as active
     : connection.testStatus;
 
   const getStatusVariant = () => getConnectionStatusVariant(connection.isActive, effectiveStatus);
@@ -171,6 +226,20 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
             <Badge variant="default" size="sm">
               {authLabel}
             </Badge>
+            {isCodebuddyCnOauth && (
+              <Badge
+                variant={checkinBadgeVariant}
+                size="sm"
+                title={checkinBadgeTitle}
+              >
+                签到
+              </Badge>
+            )}
+            {isCodebuddyCnOauth && phoneMasked && (
+              <Badge variant="default" size="sm" title="Masked phone from credential">
+                {phoneMasked}
+              </Badge>
+            )}
             {hasAnyProxy && (
               <Badge variant={proxyBadgeVariant} size="sm">
                 Proxy
@@ -284,12 +353,15 @@ ConnectionRow.propTypes = {
     name: PropTypes.string,
     email: PropTypes.string,
     displayName: PropTypes.string,
+    provider: PropTypes.string,
+    authType: PropTypes.string,
     modelLockUntil: PropTypes.string,
     testStatus: PropTypes.string,
     isActive: PropTypes.bool,
     lastError: PropTypes.string,
     priority: PropTypes.number,
     globalPriority: PropTypes.number,
+    providerSpecificData: PropTypes.object,
   }).isRequired,
   proxyPools: PropTypes.arrayOf(PropTypes.shape({
     id: PropTypes.string,
