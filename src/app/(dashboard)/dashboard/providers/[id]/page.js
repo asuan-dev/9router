@@ -30,7 +30,6 @@ const AUTO_PING_SETTINGS_KEYS = {
   codex: "codexAutoPing",
 };
 
-const AUTO_CHECKIN_SETTINGS_KEY = "codebuddyAutoCheckin";
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -68,7 +67,6 @@ export default function ProviderDetailPage() {
   const [providerStickyLimit, setProviderStickyLimit] = useState("");
   const [thinkingMode, setThinkingMode] = useState("auto");
   const [autoPing, setAutoPing] = useState({ enabled: false, connections: {} });
-  const [autoCheckinEnabled, setAutoCheckinEnabled] = useState(false);
   const [refreshingAllProfiles, setRefreshingAllProfiles] = useState(false);
   const [suggestedModels, setSuggestedModels] = useState([]);
   const [liveModels, setLiveModels] = useState([]);
@@ -322,16 +320,6 @@ export default function ProviderDetailPage() {
       const autoPingSettingsKey = AUTO_PING_SETTINGS_KEYS[providerId];
       const apCfg = autoPingSettingsKey ? settingsData[autoPingSettingsKey] || {} : {};
       setAutoPing({ enabled: apCfg.enabled === true, connections: apCfg.connections || {} });
-      if (providerId === "codebuddy-cn") {
-        const acCfg = settingsData[AUTO_CHECKIN_SETTINGS_KEY] || {};
-        const on =
-          typeof acCfg.enabled === "boolean"
-            ? acCfg.enabled === true
-            : Object.values(acCfg.connections || {}).some(Boolean);
-        setAutoCheckinEnabled(on);
-      } else {
-        setAutoCheckinEnabled(false);
-      }
       if (nodesRes.ok) {
         let node = (nodesData.nodes || []).find((entry) => entry.id === providerId) || null;
 
@@ -464,21 +452,6 @@ export default function ProviderDetailPage() {
     saveAutoPing({ ...autoPing, connections: { ...autoPing.connections, [connectionId]: on } });
   };
 
-  const saveAutoCheckinEnabled = async (on) => {
-    if (providerId !== "codebuddy-cn") return;
-    setAutoCheckinEnabled(on);
-    try {
-      // Single boolean in settings JSON (same settings row/table as author).
-      // Drop legacy per-id map by writing only { enabled }.
-      await fetch("/api/settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ [AUTO_CHECKIN_SETTINGS_KEY]: { enabled: on } }),
-      });
-    } catch (error) {
-      console.log("Error saving auto-checkin config:", error);
-    }
-  };
 
   const handleAutoCheckinGlobal = async (on) => {
     const oauthConns = connections.filter((c) => c.authType === "oauth");
