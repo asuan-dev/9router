@@ -5,6 +5,7 @@ import { getStatusVariant as getConnectionStatusVariant } from "@/shared/utils/c
 import PropTypes from "prop-types";
 import { Badge, Toggle, Tooltip } from "@/shared/components";
 import CooldownTimer from "./CooldownTimer";
+import ActivityPanel from "./ActivityPanel";
 
 export default function ConnectionRow({
   connection,
@@ -20,6 +21,7 @@ export default function ConnectionRow({
   onDelete,
   oneByOneStatus = null,
   autoPing = null,
+  onUpdatePsd = null,
 }) {
   const [showProxyDropdown, setShowProxyDropdown] = useState(false);
   const [updatingProxy, setUpdatingProxy] = useState(false);
@@ -337,6 +339,13 @@ export default function ConnectionRow({
                 <span className="text-[10px] leading-tight">Auto-ping</span>
               </button>
             </Tooltip>
+          )}
+          {isOAuth && ["codebuddy-cn", "qoderwork-cn"].includes(connection.provider) && (
+            <ActivityPanel
+              connection={connection}
+              providerId={connection.provider}
+              onStateUpdate={(patch) => onUpdatePsd && onUpdatePsd(connection.id, patch)}
+            />
           )}
           <button onClick={onEdit} className="flex flex-col items-center rounded px-2 py-1 text-text-muted hover:bg-black/5 hover:text-primary dark:hover:bg-white/5">
             <span className="material-symbols-outlined text-[18px]">edit</span>

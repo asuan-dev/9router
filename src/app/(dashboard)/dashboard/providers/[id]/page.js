@@ -1098,6 +1098,15 @@ export default function ProviderDetailPage() {
                 }}
                 onDelete={() => handleDelete(conn.id)}
                 oneByOneStatus={oneByOneResults[conn.id] || null}
+                onUpdatePsd={(connId, patch) => {
+                  setConnections((prev) =>
+                    prev.map((c) =>
+                      c.id === connId
+                        ? { ...c, providerSpecificData: { ...(c.providerSpecificData || {}), ...patch } }
+                        : c,
+                    ),
+                  );
+                }}
               />
             </div>
           </div>
@@ -1608,16 +1617,6 @@ export default function ProviderDetailPage() {
                   </div>
                 )}
               </div>
-              {providerId === "codebuddy-cn" && connections.some((c) => c.authType === "oauth") && (
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-xs text-text-muted font-medium">签到</span>
-                  <Toggle
-                    checked={autoCheckinEnabled}
-                    onChange={handleAutoCheckinGlobal}
-                    title="开启后：全部 CodeBuddy CN OAuth 账号每日自动签到；关闭则全部不签"
-                  />
-                </div>
-              )}
             </div>
           </div>
 
