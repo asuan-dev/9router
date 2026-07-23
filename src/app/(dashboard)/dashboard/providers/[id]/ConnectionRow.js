@@ -22,6 +22,7 @@ export default function ConnectionRow({
   oneByOneStatus = null,
   autoPing = null,
   onUpdatePsd = null,
+  hasActivities = false,
 }) {
   const [showProxyDropdown, setShowProxyDropdown] = useState(false);
   const [updatingProxy, setUpdatingProxy] = useState(false);
@@ -340,7 +341,7 @@ export default function ConnectionRow({
               </button>
             </Tooltip>
           )}
-          {isOAuth && ["codebuddy-cn", "qoderwork-cn"].includes(connection.provider) && (
+          {isOAuth && hasActivities && (
             <ActivityPanel
               connection={connection}
               providerId={connection.provider}

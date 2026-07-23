@@ -521,7 +521,7 @@ export default function ProviderDetailPage() {
 
   // Event-driven badge update: scheduler emits after each check-in attempt.
   useEffect(() => {
-    const es = new EventSource("/api/providers/codebuddy-checkin/stream");
+    const es = new EventSource("/api/activities/stream");
     es.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
@@ -1095,6 +1095,7 @@ export default function ProviderDetailPage() {
                     ),
                   );
                 }}
+                hasActivities={["codebuddy-cn", "qoderwork-cn"].includes(providerId)}
               />
             </div>
           </div>
