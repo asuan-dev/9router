@@ -13,6 +13,7 @@ import { describe, it, expect } from "vitest";
 import crypto from "crypto";
 
 import { qoderEncodeBody, buildCosyHeaders, normalizeMessages, wrapQoderSSE, buildQoderRequestBody } from "../../open-sse/protocol/qoder/test-utils.js";
+import { SHELL, resolveReasoningEffort } from "../../open-sse/protocol/qoder/body.js";
 import { QoderService } from "../../src/lib/oauth/services/qoder.js";
 import {
   QODER_CHAT_URL_ENCODED,
@@ -391,6 +392,15 @@ describe("normalizeMessages", () => {
     expect(result.messages).toEqual([]);
     expect(result.systemText).toBe("");
   });
+
+  it("hoists developer role into systemText like system", () => {
+    const result = normalizeMessages([
+      { role: "developer", content: "dev rules" },
+      { role: "user", content: "hi" },
+    ]);
+    expect(result.systemText).toBe("dev rules");
+    expect(result.messages).toHaveLength(1);
+  });
 });
 
 describe("wrapQoderSSE", () => {
@@ -582,5 +592,91 @@ describe("profile-driven payload + cosy (simulation)", () => {
     const svc = new QoderService();
     const flow = svc.initiateDeviceFlow();
     expect(flow.verificationUriComplete.startsWith(INTL_PROFILE.loginUrl)).toBe(true);
+  });
+});
+
+describe("contract body (awA)", () => {
+  const credentials = {
+    accessToken: "dt-test",
+    displayName: "T",
+    email: "t@x.com",
+    providerSpecificData: { userId: "u1", machineId: "m1" },
+  };
+  const fakeModelConfig = {
+    key: "qmodel_latest",
+    display_name: "Q",
+    is_reasoning: true,
+    max_output_tokens: 8192,
+    max_input_tokens: 100000,
+    source: "system",
+    format: "openai",
+  };
+
+  it("builds FREE_INPUT shell without catalog when modelConfig injected", async () => {
+    const { qoderKey, payload } = await buildQoderRequestBody({
+      model: "qoder/qmodel_latest",
+      body: {
+        messages: [
+          { role: "system", content: "sys" },
+          { role: "user", content: "hello world" },
+        ],
+        max_tokens: 1000,
+        tools: [],
+      },
+      credentials,
+      modelConfig: fakeModelConfig,
+    });
+    expect(qoderKey).toBe("qmodel_latest");
+    expect(payload.chat_task).toBe(SHELL.chat_task);
+    expect(payload.source).toBe(1);
+    expect(payload.version).toBe("3");
+    expect(payload.agent_id).toBe("agent_common");
+    expect(payload.stream).toBe(true);
+    expect(payload.system).toBe("sys");
+    expect(payload.messages).toEqual([{ role: "user", content: "hello world" }]);
+    expect(payload.parameters.max_tokens).toBe(1000);
+    expect(payload.model_config.key).toBe("qmodel_latest");
+    expect(payload.chat_context.text).toBe("hello world");
+    expect(payload.chat_context.extra.modelConfig).toEqual({
+      key: "qmodel_latest",
+      is_reasoning: true,
+    });
+    // awA: three ids share request_id by default
+    expect(payload.request_id).toBe(payload.request_set_id);
+    expect(payload.request_id).toBe(payload.chat_record_id);
+    // business omitted by default
+    expect(payload.business).toBeUndefined();
+  });
+
+  it("maps reasoning_effort into parameters", async () => {
+    const { payload } = await buildQoderRequestBody({
+      model: "qmodel_latest",
+      body: {
+        messages: [{ role: "user", content: "x" }],
+        reasoning_effort: "high",
+      },
+      credentials,
+      modelConfig: fakeModelConfig,
+    });
+    expect(payload.parameters.reasoning_effort).toBe("high");
+  });
+
+  it("includeBusiness adds business block from profile", async () => {
+    const { payload } = await buildQoderRequestBody({
+      model: "qmodel_latest",
+      body: { messages: [{ role: "user", content: "title here" }] },
+      credentials,
+      modelConfig: fakeModelConfig,
+      includeBusiness: true,
+    });
+    expect(payload.business).toBeDefined();
+    expect(payload.business.product).toBeDefined();
+    expect(payload.business.type).toBe("agent");
+  });
+
+  it("resolveReasoningEffort normalizes aliases", () => {
+    expect(resolveReasoningEffort({ reasoning_effort: "x-high" })).toBe("xhigh");
+    expect(resolveReasoningEffort({ reasoning: { effort: "low" } })).toBe("low");
+    expect(resolveReasoningEffort({ reasoning_effort: "auto" })).toBeUndefined();
   });
 });

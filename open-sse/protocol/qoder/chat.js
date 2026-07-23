@@ -1,5 +1,8 @@
 /**
  * Qoder chat: build → encode → Cosy sign → fetch → unwrap SSE.
+ *
+ * Contract: lab/qodercli/PROTOCOL-SCHEMA.md
+ * Inject: modelConfig (skip list), fetchImpl (simulate upstream).
  */
 
 import { proxyAwareFetch } from "../../utils/proxyFetch.js";
@@ -12,6 +15,10 @@ import { resolveProfile } from "./profile.js";
 
 /**
  * Execute one Qoder chat request.
+ * @param {object} opts
+ * @param {object} [opts.modelConfig] - injected model_config (no catalog fetch)
+ * @param {typeof fetch} [opts.fetchImpl] - inject fetch for tests
+ * @param {boolean} [opts.includeBusiness]
  * @returns {Promise<{ response: Response, url: string, headers: object, transformedBody: object }>}
  */
 export async function chat({
@@ -23,6 +30,9 @@ export async function chat({
   proxyOptions = null,
   profile = null,
   timeoutMs = null,
+  modelConfig = null,
+  fetchImpl = null,
+  includeBusiness = false,
 }) {
   const p = resolveProfile(profile);
   const url = p.chatUrl;
@@ -54,6 +64,8 @@ export async function chat({
       proxyOptions,
       signal,
       profile: p,
+      modelConfig,
+      includeBusiness,
     }));
   } catch (err) {
     const fakeResp = new Response(
@@ -69,13 +81,18 @@ export async function chat({
 
   let cosyHeaders;
   try {
-    cosyHeaders = buildCosyHeaders(encodedBodyBuf, url, {
-      userId: psd.userId,
-      authToken: credentials.accessToken,
-      name: credentials.displayName || "",
-      email: credentials.email || "",
-      machineId: psd.machineId || "",
-    }, p);
+    cosyHeaders = buildCosyHeaders(
+      encodedBodyBuf,
+      url,
+      {
+        userId: psd.userId,
+        authToken: credentials.accessToken,
+        name: credentials.displayName || "",
+        email: credentials.email || "",
+        machineId: psd.machineId || "",
+      },
+      p,
+    );
   } catch (err) {
     const fakeResp = new Response(
       JSON.stringify({ error: { message: `qoder cosy signing failed: ${err.message}` } }),
@@ -105,11 +122,12 @@ export async function chat({
 
   let response;
   try {
-    response = await proxyAwareFetch(
-      url,
-      { method: "POST", headers, body: encodedBodyBuf, signal: mergedSignal },
-      proxyOptions,
-    );
+    const init = { method: "POST", headers, body: encodedBodyBuf, signal: mergedSignal };
+    if (typeof fetchImpl === "function") {
+      response = await fetchImpl(url, init);
+    } else {
+      response = await proxyAwareFetch(url, init, proxyOptions);
+    }
   } finally {
     clearTimeout(connectTimer);
   }

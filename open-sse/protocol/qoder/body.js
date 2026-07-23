@@ -1,10 +1,39 @@
 /**
- * OpenAI chat body → Qoder private request payload.
+ * OpenAI Chat Completions → Qoder private request payload.
+ *
+ * Contract (authoritative, not legacy 9r guesses):
+ *   lab/qodercli/PROTOCOL-SCHEMA.md
+ *   lab/qodercli/1.1.3/awA-return-object.js.txt
+ *   lab/qodercli/docs/field-matrix-core.md
+ *
+ * Classification:
+ *   DIRECT  — messages (non-system), tools, stream
+ *   RENAME  — model→model_config; system msgs→system; max_tokens→parameters.max_tokens
+ *   ADD     — FREE_INPUT shell, ids, chat_context, session_type, optional business
+ *   DROP    — temperature/top_p/seed/… (minimal path)
  */
 
 import { createHash, randomUUID } from "crypto";
 import { getQoderModelConfig, resolveQoderModels } from "./catalog.js";
 import { resolveProfile } from "./profile.js";
+
+/** Official free-chat shell (awA). */
+const SHELL = {
+  chat_task: "FREE_INPUT",
+  stream: true,
+  is_reply: true,
+  is_retry: false,
+  source: 1,
+  version: "3",
+  agent_id: "agent_common",
+  task_id: "common",
+  code_language: "",
+  chat_prompt: "",
+  image_urls: null,
+  aliyun_user_type: "",
+};
+
+const EFFORT_SET = new Set(["none", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
 function normalizeMessages(messages) {
   if (!Array.isArray(messages) || messages.length === 0) {
@@ -15,7 +44,8 @@ function normalizeMessages(messages) {
   for (const msg of messages) {
     if (!msg || typeof msg !== "object") continue;
     const text = extractText(msg.content);
-    if (msg.role === "system") {
+    // Chat: system + developer both become Qoder top-level system (RENAME).
+    if (msg.role === "system" || msg.role === "developer") {
       if (text) systemParts.push(text);
       continue;
     }
@@ -65,127 +95,169 @@ function stableHash(prefix, ...parts) {
   return h.digest("hex").slice(0, 16);
 }
 
-function stableChatRecordId(model, messages, tools, maxTokens) {
-  const h = createHash("sha256");
-  h.update("qoder-record\0");
-  h.update(String(model));
-  for (const m of messages) {
-    if (!m || typeof m !== "object") continue;
-    if (m.role) { h.update("\0"); h.update(m.role); }
-    if (typeof m.content === "string" && m.content) {
-      h.update("\0"); h.update(m.content);
-    }
-  }
-  if (tools) {
-    h.update("\0");
-    try { h.update(JSON.stringify(tools)); } catch {}
-  }
-  h.update(`\0mt=${maxTokens}`);
-  return h.digest("hex").slice(0, 16);
-}
-
 function truncate(s, n) {
   return s && s.length > n ? `${s.slice(0, n)}...` : s || "";
 }
 
 /**
- * Map the OpenAI-style request body into the exact shape Qoder expects.
+ * Resolve Chat reasoning_effort → Qoder parameters.reasoning_effort.
+ * @returns {string|undefined}
  */
-async function buildQoderRequestBody({ model, body, credentials, log, proxyOptions, signal, profile = null }) {
+function resolveReasoningEffort(body) {
+  if (!body || typeof body !== "object") return undefined;
+  let raw = body.reasoning_effort;
+  if (raw == null && body.reasoning && typeof body.reasoning === "object") {
+    raw = body.reasoning.effort;
+  }
+  if (raw == null) return undefined;
+  const v = String(raw).trim().toLowerCase();
+  if (!v) return undefined;
+  if (EFFORT_SET.has(v)) return v;
+  // Common aliases
+  if (v === "x-high") return "xhigh";
+  if (v === "auto") return undefined;
+  return undefined;
+}
+
+/**
+ * Build chat_context (official GhI shape).
+ */
+function buildChatContext(lastUser, qoderKey, isReasoning) {
+  return {
+    text: lastUser,
+    features: [],
+    extra: {
+      context: [],
+      modelConfig: { key: qoderKey, is_reasoning: !!isReasoning },
+      originalContent: lastUser,
+    },
+    chatPrompt: "",
+    imageUrls: null,
+  };
+}
+
+/**
+ * @param {object} opts
+ * @param {string} opts.model
+ * @param {object} opts.body - OpenAI chat body
+ * @param {object} opts.credentials
+ * @param {object|null} [opts.modelConfig] - inject: skip catalog when set
+ * @param {boolean} [opts.includeBusiness=false] - awA treats business as optional
+ * @param {any} [opts.profile]
+ */
+async function buildQoderRequestBody({
+  model,
+  body,
+  credentials,
+  log,
+  proxyOptions,
+  signal,
+  profile = null,
+  modelConfig: modelConfigInject = null,
+  includeBusiness = false,
+}) {
   const p = resolveProfile(profile);
   const qoderKey = String(model || "").replace(/^qoder\//, "");
-  
-  // Fetch model config from dynamic API instead of relying on static QODER_MODEL_MAP.
-  // This allows support for new Qoder models (e.g., qmodel_latest) without code changes.
-  let modelConfig = await getQoderModelConfig(credentials, qoderKey, { log, proxyOptions, signal, profile: p });
+
+  let modelConfig = modelConfigInject;
   if (!modelConfig) {
-    // Try a forced refresh once before giving up — the cache may simply
-    // not be populated yet on first ever call for this credential.
-    const refreshed = await resolveQoderModels(credentials, { forceRefresh: true, log, proxyOptions, signal, profile: p });
-    const retried = refreshed?.rawConfigs.get(qoderKey);
-    if (!retried) {
-      throw new Error(
-        `qoder: model_config for "${qoderKey}" not yet known (run a model list fetch or check upstream connectivity)`,
-      );
+    modelConfig = await getQoderModelConfig(credentials, qoderKey, {
+      log,
+      proxyOptions,
+      signal,
+      profile: p,
+    });
+    if (!modelConfig) {
+      const refreshed = await resolveQoderModels(credentials, {
+        forceRefresh: true,
+        log,
+        proxyOptions,
+        signal,
+        profile: p,
+      });
+      const retried = refreshed?.rawConfigs.get(qoderKey);
+      if (!retried) {
+        throw new Error(
+          `qoder: model_config for "${qoderKey}" not yet known (inject modelConfig or fetch model list)`,
+        );
+      }
+      modelConfig = { ...retried, key: qoderKey };
     }
-    modelConfig = { ...retried, key: qoderKey };
+  } else if (!modelConfig.key) {
+    modelConfig = { ...modelConfig, key: qoderKey };
   }
 
-  const { messages, systemText } = normalizeMessages(body.messages || []);
-  const tools = body.tools;
+  const { messages, systemText } = normalizeMessages(body?.messages || []);
+  const tools = Array.isArray(body?.tools) ? body.tools : [];
   const isReasoning = !!modelConfig.is_reasoning;
   const maxOutputTokens = Number(modelConfig.max_output_tokens) || 0;
 
   let maxTokens = 32_768;
   if (maxOutputTokens > 0) maxTokens = maxOutputTokens;
-  if (typeof body.max_tokens === "number" && body.max_tokens > 0 && body.max_tokens < maxTokens) {
+  if (typeof body?.max_tokens === "number" && body.max_tokens > 0 && body.max_tokens < maxTokens) {
     maxTokens = body.max_tokens;
   }
-  if (typeof body.max_completion_tokens === "number" && body.max_completion_tokens > 0 && body.max_completion_tokens < maxTokens) {
+  if (
+    typeof body?.max_completion_tokens === "number" &&
+    body.max_completion_tokens > 0 &&
+    body.max_completion_tokens < maxTokens
+  ) {
     maxTokens = body.max_completion_tokens;
   }
 
   const lastUser = lastUserText(messages);
-  const psd = credentials.providerSpecificData || {};
+  const psd = credentials?.providerSpecificData || {};
+  // awA: request_id / request_set_id / chat_record_id share one id by default.
+  const requestId = randomUUID();
   const sessionId = stableHash("qoder-session", psd.userId, qoderKey);
-  const recordId = stableChatRecordId(qoderKey, messages, tools, maxTokens);
 
-  return {
-    qoderKey,
-    payload: {
-      request_id: randomUUID(),
-      request_set_id: recordId,
-      chat_record_id: recordId,
-      session_id: sessionId,
-      stream: true,
-      chat_task: "FREE_INPUT",
-      is_reply: true,
-      is_retry: false,
-      source: 1,
-      version: "3",
-      session_type: p.sessionType,
-      agent_id: "agent_common",
-      task_id: "common",
-      code_language: "",
-      chat_prompt: "",
-      image_urls: null,
-      aliyun_user_type: "",
-      system: systemText,
-      messages,
-      tools: Array.isArray(tools) ? tools : [],
-      parameters: { max_tokens: maxTokens },
-      chat_context: {
-        chatPrompt: "",
-        imageUrls: null,
-        extra: {
-          context: [],
-          modelConfig: { key: qoderKey, is_reasoning: isReasoning },
-          originalContent: lastUser,
-        },
-        features: [],
-        text: lastUser,
-      },
-      model_config: modelConfig,
-      business: {
-        product: p.businessProduct,
-        version: p.businessVersion,
-        type: "agent",
-        stage: "start",
-        id: randomUUID(),
-        name: truncate(lastUser, 30),
-        begin_at: Date.now(),
-      },
-    },
-    modelConfig,
+  const parameters = { max_tokens: maxTokens };
+  const effort = resolveReasoningEffort(body);
+  if (effort !== undefined) parameters.reasoning_effort = effort;
+  if (typeof body?.tool_choice !== "undefined") parameters.tool_choice = body.tool_choice;
+  // Optional context window (official: parameters.context_length from contextWindow).
+  if (typeof body?.context_length === "number" && body.context_length > 0) {
+    parameters.context_length = body.context_length;
+  } else if (typeof body?.contextWindow === "number" && body.contextWindow > 0) {
+    parameters.context_length = body.contextWindow;
+  }
+
+  const payload = {
+    request_id: requestId,
+    request_set_id: requestId,
+    chat_record_id: requestId,
+    session_id: sessionId,
+    ...SHELL,
+    session_type: p.sessionType,
+    model_config: modelConfig,
+    system: systemText,
+    messages,
+    tools,
+    parameters,
+    chat_context: buildChatContext(lastUser, qoderKey, isReasoning),
   };
+
+  // awA spreads business only when present — default omit (ADD optional).
+  if (includeBusiness || p.includeBusiness) {
+    payload.business = {
+      product: p.businessProduct,
+      version: p.businessVersion,
+      type: "agent",
+      stage: "start",
+      id: randomUUID(),
+      name: truncate(lastUser, 30),
+      begin_at: Date.now(),
+    };
+  }
+
+  return { qoderKey, payload, modelConfig };
 }
 
-
 /**
- * @param { model: string, body: object, credentials: object, log?: any, proxyOptions?: any, signal?: AbortSignal, profile?: any } opts
+ * @param {object} opts
  */
 export async function buildChatPayload(opts) {
   return buildQoderRequestBody(opts);
 }
 
-export { normalizeMessages, buildQoderRequestBody };
+export { normalizeMessages, buildQoderRequestBody, resolveReasoningEffort, buildChatContext, SHELL };
