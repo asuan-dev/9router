@@ -107,7 +107,7 @@ export const CN_WORK_PROFILE = {
   businessVersion: "1.0.0",
   businessType: "agent",
   includeBusiness: true,
-  clientType: QODER_CLIENT_TYPE,
+  clientType: "6",
   ideVersion: QODER_IDE_VERSION,
   loginVersion: QODER_LOGIN_VERSION,
   dataPolicy: QODER_DATA_POLICY,
