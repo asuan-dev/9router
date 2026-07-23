@@ -91,7 +91,8 @@ function truncate(s, n) {
 /**
  * Map the OpenAI-style request body into the exact shape Qoder expects.
  */
-async function buildQoderRequestBody({ model, body, credentials, log, proxyOptions, signal }) {
+async function buildQoderRequestBody({ model, body, credentials, log, proxyOptions, signal, profile = null }) {
+  const p = resolveProfile(profile);
   const qoderKey = String(model || "").replace(/^qoder\//, "");
   
   // Fetch model config from dynamic API instead of relying on static QODER_MODEL_MAP.
@@ -142,7 +143,7 @@ async function buildQoderRequestBody({ model, body, credentials, log, proxyOptio
       is_retry: false,
       source: 1,
       version: "3",
-      session_type: "qodercli",
+      session_type: p.sessionType,
       agent_id: "agent_common",
       task_id: "common",
       code_language: "",
@@ -166,8 +167,8 @@ async function buildQoderRequestBody({ model, body, credentials, log, proxyOptio
       },
       model_config: modelConfig,
       business: {
-        product: "cli",
-        version: "1.0.0",
+        product: p.businessProduct,
+        version: p.businessVersion,
         type: "agent",
         stage: "start",
         id: randomUUID(),
@@ -184,17 +185,7 @@ async function buildQoderRequestBody({ model, body, credentials, log, proxyOptio
  * @param { model: string, body: object, credentials: object, log?: any, proxyOptions?: any, signal?: AbortSignal, profile?: any } opts
  */
 export async function buildChatPayload(opts) {
-  const profile = resolveProfile(opts.profile);
-  const result = await buildQoderRequestBody(opts);
-  // Apply profile product fields (intl defaults match previous hardcodes).
-  if (result?.payload) {
-    result.payload.session_type = profile.sessionType;
-    if (result.payload.business) {
-      result.payload.business.product = profile.businessProduct;
-      result.payload.business.version = profile.businessVersion;
-    }
-  }
-  return result;
+  return buildQoderRequestBody(opts);
 }
 
 export { normalizeMessages, buildQoderRequestBody };

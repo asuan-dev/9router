@@ -185,6 +185,28 @@ describe("buildCosyHeaders", () => {
     expect(headers.Authorization).toMatch(/^Bearer COSY\.[A-Za-z0-9+/=]+\.[a-f0-9]{32}$/);
   });
 
+  it("Authorization sig matches official space-separated Cosy MD5 input", () => {
+    // Official Qoder IDE 1.17.3 / QoderWork CN: MD5(payload + " " + key + " " + ts + " " + body + " " + sigPath).
+    // A newline-joined sigInput must NOT match the Authorization signature.
+    const body = Buffer.from("space-delimiter-probe", "utf8");
+    const headers = buildCosyHeaders(body, QODER_MODEL_LIST_URL, creds);
+    const auth = headers.Authorization;
+    const m = /^Bearer COSY\.([A-Za-z0-9+/=]+)\.([a-f0-9]{32})$/.exec(auth);
+    expect(m).toBeTruthy();
+    const payloadB64 = m[1];
+    const sig = m[2];
+    const cosyKey = headers["Cosy-Key"];
+    const timestamp = headers["Cosy-Date"];
+    const sigPath = headers["Cosy-Sigpath"];
+    const bodyLatin1 = body.toString("latin1");
+    const spaceInput = `${payloadB64} ${cosyKey} ${timestamp} ${bodyLatin1} ${sigPath}`;
+    const newlineInput = `${payloadB64}\n${cosyKey}\n${timestamp}\n${bodyLatin1}\n${sigPath}`;
+    const spaceMd5 = crypto.createHash("md5").update(Buffer.from(spaceInput, "latin1")).digest("hex");
+    const newlineMd5 = crypto.createHash("md5").update(Buffer.from(newlineInput, "latin1")).digest("hex");
+    expect(sig).toBe(spaceMd5);
+    expect(sig).not.toBe(newlineMd5);
+  });
+
   it("Cosy-Sigpath strips the leading /algo prefix", () => {
     const headers = buildCosyHeaders(Buffer.alloc(0), QODER_MODEL_LIST_URL, creds);
     expect(headers["Cosy-Sigpath"]).toBe("/api/v2/model/list");
