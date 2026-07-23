@@ -69,8 +69,6 @@ export default function ProviderDetailPage() {
   const [thinkingMode, setThinkingMode] = useState("auto");
   const [autoPing, setAutoPing] = useState({ enabled: false, connections: {} });
   const [autoCheckinEnabled, setAutoCheckinEnabled] = useState(false);
-  const [qoderworkActivityBusy, setQoderworkActivityBusy] = useState(false);
-  const [qoderworkActivityMsg, setQoderworkActivityMsg] = useState("");
   const [refreshingAllProfiles, setRefreshingAllProfiles] = useState(false);
   const [suggestedModels, setSuggestedModels] = useState([]);
   const [liveModels, setLiveModels] = useState([]);
@@ -532,31 +530,6 @@ export default function ProviderDetailPage() {
   }, [fetchConnections, fetchAliases, fetchCustomModels, fetchDisabledModels]);
 
 
-  async function runQoderworkCnActivity(connectionId, action) {
-    if (!connectionId || !action) return;
-    setQoderworkActivityBusy(true);
-    setQoderworkActivityMsg("");
-    try {
-      const res = await fetch("/api/providers/qoderwork-cn/activity", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ connectionId, action }),
-      });
-      const data = await res.json().catch(() => ({}));
-      setQoderworkActivityMsg(
-        data.ok
-          ? `${action}: ok`
-          : `${action}: ${data.message || data.error || res.status}`,
-      );
-      if (data.ok && (action === "checkin-status" || action === "checkin-claim")) {
-        await handleRefreshProfile(connectionId);
-      }
-    } catch (e) {
-      setQoderworkActivityMsg(`${action}: ${e.message || e}`);
-    } finally {
-      setQoderworkActivityBusy(false);
-    }
-  }
 
   // Event-driven badge update: only when scheduler gets an upstream check-in response.
   useEffect(() => {
@@ -1601,31 +1574,6 @@ export default function ProviderDetailPage() {
                 </>
               )}
               
-              {providerId === "qoderwork-cn" && connections.some((c) => c.authType === "oauth") && (
-                <div className="mb-4 rounded-lg border border-border p-3 space-y-2">
-                  <div className="text-sm font-medium">QoderWork CN 活动</div>
-                  <div className="flex flex-wrap gap-2">
-                    {connections.filter((c) => c.authType === "oauth").slice(0, 3).map((c) => (
-                      <div key={c.id} className="flex flex-wrap gap-1 items-center">
-                        <span className="text-xs text-muted-foreground">{c.name || c.email || c.id.slice(0, 8)}</span>
-                        <button type="button" className="text-xs px-2 py-1 rounded border" disabled={qoderworkActivityBusy}
-                          onClick={() => runQoderworkCnActivity(c.id, "checkin-status")}>签到状态</button>
-                        <button type="button" className="text-xs px-2 py-1 rounded border" disabled={qoderworkActivityBusy}
-                          onClick={() => runQoderworkCnActivity(c.id, "checkin-claim")}>签到</button>
-                        <button type="button" className="text-xs px-2 py-1 rounded border" disabled={qoderworkActivityBusy}
-                          onClick={() => runQoderworkCnActivity(c.id, "pro-eligibility")}>Pro资格</button>
-                        <button type="button" className="text-xs px-2 py-1 rounded border" disabled={qoderworkActivityBusy}
-                          onClick={() => runQoderworkCnActivity(c.id, "invitation-code")}>邀请码</button>
-                        <button type="button" className="text-xs px-2 py-1 rounded border" disabled={qoderworkActivityBusy}
-                          onClick={() => runQoderworkCnActivity(c.id, "pro-claim")}>Pro领取</button>
-                        <button type="button" className="text-xs px-2 py-1 rounded border" disabled={qoderworkActivityBusy}
-                          onClick={() => runQoderworkCnActivity(c.id, "invitation-rewards")}>邀请奖励</button>
-                      </div>
-                    ))}
-                  </div>
-                  {qoderworkActivityMsg ? <div className="text-xs text-muted-foreground">{qoderworkActivityMsg}</div> : null}
-                </div>
-              )}
 
               {(providerId === "codebuddy-cn" || providerId === "qoderwork-cn") && connections.some((c) => c.authType === "oauth") && (
                 <Button
