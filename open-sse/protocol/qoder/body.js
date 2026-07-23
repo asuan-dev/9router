@@ -1,23 +1,26 @@
 /**
  * OpenAI Chat Completions → Qoder private request payload.
  *
- * Contract (authoritative, not legacy 9r guesses):
+ * Contract:
+ *   lab/qodercli/docs/field-ops-chat-to-qoder.md
+ *   lab/qodercli/docs/content-parts-official.md
  *   lab/qodercli/PROTOCOL-SCHEMA.md
- *   lab/qodercli/1.1.3/awA-return-object.js.txt
- *   lab/qodercli/docs/field-matrix-core.md
+ *   lab/qodercli/1.1.3/awA-*.txt
  *
- * Classification:
- *   DIRECT  — messages (non-system), tools, stream
- *   RENAME  — model→model_config; system msgs→system; max_tokens→parameters.max_tokens
- *   ADD     — FREE_INPUT shell, ids, chat_context, session_type, optional business
- *   DROP    — temperature/top_p/seed/… (minimal path)
+ * Practical-minimal convert (not “text-only micro”):
+ *   ACTIVE — shell, system hoist, text, Chat image_url, official binary,
+ *            tools / tool_calls / tool_call_id / name, reasoning_effort,
+ *            max_tokens, tool_choice, context_length, shell image lists.
+ *   COMMENTED — rare client shims (Anthropic source, unknown parts, legacy
+ *            function_call/refusal). Uncomment when needed; do not delete.
+ *   Never strip vision/tools because a model “might not support them”.
  */
 
 import { createHash, randomUUID } from "crypto";
 import { getQoderModelConfig, resolveQoderModels } from "./catalog.js";
 import { resolveProfile } from "./profile.js";
 
-/** Official free-chat shell (awA). */
+/** Official free-chat shell (awA). image_urls filled when vision parts present. */
 const SHELL = {
   chat_task: "FREE_INPUT",
   stream: true,
@@ -35,52 +38,195 @@ const SHELL = {
 
 const EFFORT_SET = new Set(["none", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
-function normalizeMessages(messages) {
-  if (!Array.isArray(messages) || messages.length === 0) {
-    return { messages: [], systemText: "" };
-  }
-  const systemParts = [];
-  const out = [];
-  for (const msg of messages) {
-    if (!msg || typeof msg !== "object") continue;
-    const text = extractText(msg.content);
-    // Chat: system + developer both become Qoder top-level system (RENAME).
-    if (msg.role === "system" || msg.role === "developer") {
-      if (text) systemParts.push(text);
-      continue;
-    }
-    const cloned = { ...msg };
-    cloned.content = text;
-    out.push(cloned);
-  }
-  return { messages: out, systemText: systemParts.join("\n\n") };
+/** Message-level fields kept when present (core Chat / wire overlap). */
+const MESSAGE_PASSTHROUGH = [
+  "name",
+  "tool_calls",
+  "tool_call_id",
+  "reasoning_content",
+  // Secondary / legacy — uncomment if clients send them:
+  // "function_call",
+  // "refusal",
+];
+
+function pushImageUrl(list, url) {
+  if (typeof url === "string" && url && !list.includes(url)) list.push(url);
 }
 
+/**
+ * Official ContentPart: text | image_url{url,detail} | binary{data,mime_type}.
+ * @returns {{ content: string|object[], imageUrls: string[] }}
+ */
+function convertContent(content) {
+  if (typeof content === "string") return { content, imageUrls: [] };
+  if (content == null) return { content: "", imageUrls: [] };
+
+  if (!Array.isArray(content) && typeof content === "object") {
+    return convertContent([content]);
+  }
+  if (!Array.isArray(content)) {
+    return { content: String(content), imageUrls: [] };
+  }
+
+  const parts = [];
+  const imageUrls = [];
+
+  for (const item of content) {
+    if (item == null) continue;
+    if (typeof item === "string") {
+      parts.push({ type: "text", text: item });
+      continue;
+    }
+    if (typeof item !== "object") continue;
+
+    const type = typeof item.type === "string" ? item.type : "";
+
+    // --- ACTIVE: text ---
+    if (type === "text" || (typeof item.text === "string" && !type && !item.image_url && !item.binary)) {
+      if (typeof item.text === "string") parts.push({ type: "text", text: item.text });
+      continue;
+    }
+
+    // --- ACTIVE: Chat / official image_url ---
+    if (type === "image_url" || item.image_url) {
+      const raw = item.image_url ?? item;
+      let url = "";
+      let detail;
+      if (typeof raw === "string") {
+        url = raw;
+      } else if (raw && typeof raw === "object") {
+        url = typeof raw.url === "string" ? raw.url : "";
+        if (typeof raw.detail === "string" && raw.detail) detail = raw.detail;
+      }
+      if (!url && typeof item.url === "string") url = item.url;
+      if (!url) continue;
+      const image_url = detail ? { url, detail } : { url };
+      parts.push({ type: "image_url", image_url });
+      pushImageUrl(imageUrls, url);
+      continue;
+    }
+
+    // --- ACTIVE: official binary ---
+    if (type === "binary" || item.binary || (typeof item.data === "string" && (item.mime_type || item.mimeType))) {
+      const bin = item.binary && typeof item.binary === "object" ? item.binary : item;
+      const data = typeof bin.data === "string" ? bin.data : "";
+      const mime_type =
+        (typeof bin.mime_type === "string" && bin.mime_type) ||
+        (typeof bin.mimeType === "string" && bin.mimeType) ||
+        "";
+      if (!data || !mime_type) continue;
+      parts.push({ type: "binary", binary: { data, mime_type } });
+      if (data.startsWith("data:")) pushImageUrl(imageUrls, data);
+      continue;
+    }
+
+    // --- COMMENTED: rare client shims (keep for later; not on practical-minimal path) ---
+    // // Anthropic-like: { type:"image", source:{ type:"base64", data, media_type } }
+    // if ((type === "image" || item.source?.type === "base64") && typeof item.source?.data === "string") {
+    //   const mime =
+    //     (typeof item.source.media_type === "string" && item.source.media_type) ||
+    //     (typeof item.source.mediaType === "string" && item.source.mediaType) ||
+    //     "image/png";
+    //   const dataUrl = item.source.data.startsWith("data:")
+    //     ? item.source.data
+    //     : `data:${mime};base64,${item.source.data}`;
+    //   parts.push({ type: "image_url", image_url: { url: dataUrl } });
+    //   pushImageUrl(imageUrls, dataUrl);
+    //   continue;
+    // }
+    // // Bare data: URL on item.url
+    // if (typeof item.url === "string" && /^data:image\//i.test(item.url)) {
+    //   parts.push({ type: "image_url", image_url: { url: item.url } });
+    //   pushImageUrl(imageUrls, item.url);
+    //   continue;
+    // }
+    // // Content-level tool_call / tool_response parts (Chat usually uses message-level tool_calls)
+    // if (type === "tool_call" || type === "tool_response" || item.tool_call || item.tool_response) {
+    //   parts.push({ ...item });
+    //   continue;
+    // }
+    // // Unknown typed part passthrough
+    // if (type) {
+    //   parts.push({ ...item });
+    // }
+  }
+
+  if (parts.length === 0) return { content: "", imageUrls: [] };
+  // Text-only multipart → string (official accepts string content)
+  if (imageUrls.length === 0 && parts.every((p) => p.type === "text" && typeof p.text === "string")) {
+    return { content: parts.map((p) => p.text).join("\n"), imageUrls: [] };
+  }
+  return { content: parts, imageUrls };
+}
+
+/** Text-only extraction (system hoist / chat_context.text). */
 function extractText(content) {
   if (typeof content === "string") return content;
   if (content == null) return "";
   if (Array.isArray(content)) {
     const parts = [];
     for (const item of content) {
-      if (item && typeof item === "object") {
-        if (item.type === "text" && typeof item.text === "string") {
-          parts.push(item.text);
-        } else if (typeof item.text === "string") {
-          parts.push(item.text);
-        }
-      }
+      if (!item || typeof item !== "object") continue;
+      if (typeof item.text === "string") parts.push(item.text);
     }
     return parts.join("\n");
   }
+  if (typeof content === "object" && typeof content.text === "string") return content.text;
   return String(content);
+}
+
+function pickMessageFields(msg) {
+  const out = { role: msg.role };
+  for (const k of MESSAGE_PASSTHROUGH) {
+    if (msg[k] !== undefined) out[k] = msg[k];
+  }
+  return out;
+}
+
+/**
+ * @returns {{ messages: object[], systemText: string, imageUrls: string[] }}
+ */
+function normalizeMessages(messages) {
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return { messages: [], systemText: "", imageUrls: [] };
+  }
+  const systemParts = [];
+  const out = [];
+  const allImageUrls = [];
+
+  for (const msg of messages) {
+    if (!msg || typeof msg !== "object") continue;
+
+    // Chat: system + developer → top-level system string (RENAME).
+    if (msg.role === "system" || msg.role === "developer") {
+      const text = extractText(msg.content);
+      if (text) systemParts.push(text);
+      continue;
+    }
+
+    const { content, imageUrls } = convertContent(msg.content);
+    for (const u of imageUrls) pushImageUrl(allImageUrls, u);
+
+    const next = pickMessageFields(msg);
+    next.content = content;
+    out.push(next);
+  }
+
+  return {
+    messages: out,
+    systemText: systemParts.join("\n\n"),
+    imageUrls: allImageUrls,
+  };
 }
 
 function lastUserText(messages) {
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
-    if (m?.role === "user" && typeof m.content === "string") {
-      return m.content;
-    }
+    if (m?.role !== "user") continue;
+    const t = extractText(m.content);
+    if (t) return t;
+    if (Array.isArray(m.content) && m.content.length) return "";
+    if (typeof m.content === "string") return m.content;
   }
   return "";
 }
@@ -121,8 +267,9 @@ function resolveReasoningEffort(body) {
 
 /**
  * Build chat_context (official GhI shape).
+ * imageUrls: URL list when vision parts present; else null.
  */
-function buildChatContext(lastUser, qoderKey, isReasoning) {
+function buildChatContext(lastUser, qoderKey, isReasoning, imageUrls = null) {
   return {
     text: lastUser,
     features: [],
@@ -132,7 +279,7 @@ function buildChatContext(lastUser, qoderKey, isReasoning) {
       originalContent: lastUser,
     },
     chatPrompt: "",
-    imageUrls: null,
+    imageUrls: imageUrls && imageUrls.length ? imageUrls : null,
   };
 }
 
@@ -187,7 +334,7 @@ async function buildQoderRequestBody({
     modelConfig = { ...modelConfig, key: qoderKey };
   }
 
-  const { messages, systemText } = normalizeMessages(body?.messages || []);
+  const { messages, systemText, imageUrls } = normalizeMessages(body?.messages || []);
   const tools = Array.isArray(body?.tools) ? body.tools : [];
   const isReasoning = !!modelConfig.is_reasoning;
   const maxOutputTokens = Number(modelConfig.max_output_tokens) || 0;
@@ -205,7 +352,8 @@ async function buildQoderRequestBody({
     maxTokens = body.max_completion_tokens;
   }
 
-  const lastUser = lastUserText(messages);
+  // Prefer original body for last-user text (pre-normalize) so text+image still yields text.
+  const lastUser = lastUserText(body?.messages || messages);
   const psd = credentials?.providerSpecificData || {};
   // awA: request_id / request_set_id / chat_record_id share one id by default.
   const requestId = randomUUID();
@@ -222,19 +370,22 @@ async function buildQoderRequestBody({
     parameters.context_length = body.contextWindow;
   }
 
+  const shellImageUrls = imageUrls.length ? imageUrls : null;
+
   const payload = {
     request_id: requestId,
     request_set_id: requestId,
     chat_record_id: requestId,
     session_id: sessionId,
     ...SHELL,
+    image_urls: shellImageUrls,
     session_type: p.sessionType,
     model_config: modelConfig,
     system: systemText,
     messages,
     tools,
     parameters,
-    chat_context: buildChatContext(lastUser, qoderKey, isReasoning),
+    chat_context: buildChatContext(lastUser, qoderKey, isReasoning, shellImageUrls),
   };
 
   // awA spreads business only when present — default omit (ADD optional).

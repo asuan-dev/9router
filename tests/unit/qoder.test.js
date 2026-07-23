@@ -29,6 +29,9 @@ import {
   resolveProfile,
   createProtocol,
 } from "../../open-sse/protocol/qoder/index.js";
+import { getCapabilitiesForModel } from "../../open-sse/providers/capabilities.js";
+import { getThinkingLevels } from "../../open-sse/providers/thinkingLevels.js";
+import { applyThinking } from "../../open-sse/translator/concerns/thinkingUnified.js";
 import { PROVIDER_MODELS } from "../../open-sse/config/providerModels.js";
 
 // Convenience aliases — tests were originally written against module-level
@@ -401,6 +404,78 @@ describe("normalizeMessages", () => {
     expect(result.systemText).toBe("dev rules");
     expect(result.messages).toHaveLength(1);
   });
+
+  it("keeps Chat image_url parts (official content shape)", () => {
+    const result = normalizeMessages([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "what is this" },
+          {
+            type: "image_url",
+            image_url: { url: "https://example.com/a.png", detail: "high" },
+          },
+        ],
+      },
+    ]);
+    expect(result.imageUrls).toEqual(["https://example.com/a.png"]);
+    expect(result.messages[0].content).toEqual([
+      { type: "text", text: "what is this" },
+      {
+        type: "image_url",
+        image_url: { url: "https://example.com/a.png", detail: "high" },
+      },
+    ]);
+  });
+
+  it("maps binary data+mime_type to official binary part", () => {
+    const result = normalizeMessages([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "see" },
+          { type: "binary", data: "AAAA", mime_type: "image/png" },
+        ],
+      },
+    ]);
+    expect(result.messages[0].content).toEqual([
+      { type: "text", text: "see" },
+      { type: "binary", binary: { data: "AAAA", mime_type: "image/png" } },
+    ]);
+  });
+
+  // Practical-minimal: Anthropic source shim is commented out in body.js.
+  // Uncomment body path + this test when enabling that client shape.
+  // it("converts anthropic-like base64 source to image_url data URL", () => {
+  //   const result = normalizeMessages([
+  //     {
+  //       role: "user",
+  //       content: [
+  //         {
+  //           type: "image",
+  //           source: { type: "base64", media_type: "image/jpeg", data: "qqqq" },
+  //         },
+  //       ],
+  //     },
+  //   ]);
+  //   expect(result.messages[0].content[0]).toEqual({
+  //     type: "image_url",
+  //     image_url: { url: "data:image/jpeg;base64,qqqq" },
+  //   });
+  // });
+
+  it("passthrough reasoning_content and name on messages", () => {
+    const result = normalizeMessages([
+      {
+        role: "assistant",
+        content: "ok",
+        name: "bot",
+        reasoning_content: "thoughts",
+      },
+    ]);
+    expect(result.messages[0].name).toBe("bot");
+    expect(result.messages[0].reasoning_content).toBe("thoughts");
+  });
 });
 
 describe("wrapQoderSSE", () => {
@@ -678,6 +753,137 @@ describe("contract body (awA)", () => {
     expect(resolveReasoningEffort({ reasoning_effort: "x-high" })).toBe("xhigh");
     expect(resolveReasoningEffort({ reasoning: { effort: "low" } })).toBe("low");
     expect(resolveReasoningEffort({ reasoning_effort: "auto" })).toBeUndefined();
+  });
+
+  it("passes tool_calls and tool_call_id through messages (C4)", async () => {
+    const { payload } = await buildQoderRequestBody({
+      model: "qmodel_latest",
+      body: {
+        messages: [
+          { role: "user", content: "call it" },
+          {
+            role: "assistant",
+            content: "",
+            tool_calls: [
+              {
+                id: "call_1",
+                type: "function",
+                function: { name: "t", arguments: "{}" },
+              },
+            ],
+          },
+          { role: "tool", tool_call_id: "call_1", content: "ok" },
+        ],
+      },
+      credentials,
+      modelConfig: fakeModelConfig,
+    });
+    expect(payload.messages[1].tool_calls?.[0]?.id).toBe("call_1");
+    expect(payload.messages[2].tool_call_id).toBe("call_1");
+    expect(payload.messages[2].role).toBe("tool");
+  });
+
+  it("drops temperature and keeps only CONVERT parameters (DROP)", async () => {
+    const { payload } = await buildQoderRequestBody({
+      model: "qmodel_latest",
+      body: {
+        messages: [{ role: "user", content: "x" }],
+        temperature: 0.9,
+        top_p: 0.5,
+        seed: 7,
+        max_tokens: 128,
+      },
+      credentials,
+      modelConfig: fakeModelConfig,
+    });
+    expect(payload.temperature).toBeUndefined();
+    expect(payload.parameters).toEqual({ max_tokens: 128 });
+  });
+
+  it("fills image_urls and chat_context.imageUrls from vision parts", async () => {
+    const { payload } = await buildQoderRequestBody({
+      model: "qmodel_latest",
+      body: {
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "describe" },
+              { type: "image_url", image_url: { url: "data:image/png;base64,xx" } },
+            ],
+          },
+        ],
+      },
+      credentials,
+      modelConfig: fakeModelConfig,
+    });
+    expect(payload.image_urls).toEqual(["data:image/png;base64,xx"]);
+    expect(payload.chat_context.imageUrls).toEqual(["data:image/png;base64,xx"]);
+    expect(payload.chat_context.text).toBe("describe");
+    expect(payload.messages[0].content).toEqual([
+      { type: "text", text: "describe" },
+      { type: "image_url", image_url: { url: "data:image/png;base64,xx" } },
+    ]);
+  });
+});
+
+describe("field-ops pipeline (capabilities → applyThinking → body)", () => {
+  const credentials = { providerSpecificData: { userId: "u1" } };
+  const fakeModelConfig = {
+    key: "qmodel_latest",
+    is_reasoning: true,
+    max_output_tokens: 8192,
+    source: "system",
+  };
+
+  it("marks qoder models as reasoning with openai thinkingFormat", () => {
+    expect(getCapabilitiesForModel("qoder", "qmodel_latest")).toMatchObject({
+      reasoning: true,
+      thinkingFormat: "openai",
+    });
+    expect(getThinkingLevels("qoder", "qmodel_latest")).toEqual([
+      "none",
+      "minimal",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+    ]);
+  });
+
+  it("keeps reasoning_effort through applyThinking into parameters", async () => {
+    const body = {
+      messages: [{ role: "user", content: "think" }],
+      reasoning_effort: "high",
+      max_tokens: 256,
+    };
+    applyThinking("openai", "qmodel_latest", body, "qoder");
+    expect(body.reasoning_effort).toBe("high");
+
+    const { payload } = await buildQoderRequestBody({
+      model: "qmodel_latest",
+      body,
+      credentials,
+      modelConfig: fakeModelConfig,
+    });
+    expect(payload.parameters.reasoning_effort).toBe("high");
+  });
+
+  it("maps model(level) suffix intent via applyThinking into parameters", async () => {
+    const body = {
+      messages: [{ role: "user", content: "think" }],
+      max_tokens: 256,
+    };
+    applyThinking("openai", "qmodel_latest(high)", body, "qoder");
+    expect(body.reasoning_effort).toBe("high");
+
+    const { payload } = await buildQoderRequestBody({
+      model: "qmodel_latest",
+      body,
+      credentials,
+      modelConfig: fakeModelConfig,
+    });
+    expect(payload.parameters.reasoning_effort).toBe("high");
   });
 });
 
