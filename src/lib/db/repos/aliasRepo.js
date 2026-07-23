@@ -29,19 +29,42 @@ export async function getCustomModels() {
   return Object.values(all);
 }
 
-// Atomic check-then-insert inside transaction to prevent duplicate races
+// Atomic insert-or-refresh-name inside transaction.
+// Re-importing a live catalog updates display names without duplicating rows.
 export async function addCustomModel({ providerAlias, id, type = "llm", name }) {
   const k = customKey(providerAlias, id, type);
   const db = await getAdapter();
   let added = false;
+  let updated = false;
   db.transaction(() => {
-    const row = db.get(`SELECT 1 FROM kv WHERE scope = 'customModels' AND key = ?`, [k]);
-    if (row) return;
-    const value = stringifyJson({ providerAlias, id, type, name: name || id });
-    db.run(`INSERT INTO kv(scope, key, value) VALUES('customModels', ?, ?)`, [k, value]);
-    added = true;
+    const row = db.get(`SELECT value FROM kv WHERE scope = 'customModels' AND key = ?`, [k]);
+    const nextName = name || id;
+    if (!row) {
+      const value = stringifyJson({ providerAlias, id, type, name: nextName });
+      db.run(`INSERT INTO kv(scope, key, value) VALUES('customModels', ?, ?)`, [k, value]);
+      added = true;
+      return;
+    }
+    // Refresh display name when catalog returns a better label.
+    let prev = {};
+    try {
+      prev = parseJson(row.value, {}) || {};
+    } catch {
+      prev = {};
+    }
+    if (name && prev.name !== name) {
+      const value = stringifyJson({
+        ...(prev && typeof prev === "object" ? prev : {}),
+        providerAlias,
+        id,
+        type,
+        name,
+      });
+      db.run(`UPDATE kv SET value = ? WHERE scope = 'customModels' AND key = ?`, [value, k]);
+      updated = true;
+    }
   });
-  return added;
+  return added || updated;
 }
 
 export async function deleteCustomModel({ providerAlias, id, type = "llm" }) {

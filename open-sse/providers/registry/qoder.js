@@ -44,7 +44,7 @@ export default {
     centerBaseUrl: "https://center.qoder.sh",
     chatBaseUrl: "https://api3.qoder.sh",
     deviceTokenUrl: "https://openapi.qoder.sh/api/v1/deviceToken/poll",
-    refreshUrl: "https://center.qoder.sh/algo/api/v3/user/refresh_token",
+    refreshUrl: "https://openapi.qoder.sh/api/v1/deviceToken/refresh",
     userInfoUrl: "https://openapi.qoder.sh/api/v1/userinfo",
     quotaUsageUrl: "https://openapi.qoder.sh/api/v2/quota/usage",
     loginUrl: "https://qoder.com/device/selectAccounts",

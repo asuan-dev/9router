@@ -114,14 +114,41 @@ const CODEX_GPT_56_SOL_CAPS  = { vision: true, reasoning: true, search: true, th
 const CODEX_GPT_56_DEFAULT_CAPS = { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 272000, maxOutput: 128000 };
 
 // Qoder private chat maps Chat `reasoning_effort` → `parameters.reasoning_effort`
-// (lab/qodercli/docs/field-ops-chat-to-qoder.md C7–C9). Without reasoning:true,
-// applyThinking strips effort before body.js sees it.
+// (lab/qodercli field-ops). Without reasoning:true, applyThinking strips effort.
+// Vision flags follow live model/list is_vl (CN probe 2026-07-23).
 const QODER_REASONING_CAPS = {
   reasoning: true,
-  thinkingFormat: "openai",
+  thinkingFormat: "qoder",
   thinkingCanDisable: true,
-  contextWindow: 200000,
   maxOutput: 64000,
+};
+const QODER_VL_REASONING_CAPS = {
+  ...QODER_REASONING_CAPS,
+  vision: true,
+};
+/** Shared catalog keys for intl qoder + qoderwork-cn (list still supplies model_config). */
+const QODER_PROVIDER_MODEL_CAPS = {
+  auto: QODER_VL_REASONING_CAPS,
+  qmodel_preview: QODER_VL_REASONING_CAPS,
+  qmodel_latest: QODER_VL_REASONING_CAPS,
+  qmodel: QODER_VL_REASONING_CAPS,
+  "q36fmodel": QODER_VL_REASONING_CAPS,
+  dmodel: QODER_VL_REASONING_CAPS,
+  dfmodel: { ...QODER_VL_REASONING_CAPS, reasoning: false },
+  gm51model: QODER_VL_REASONING_CAPS,
+  kmodel: QODER_VL_REASONING_CAPS,
+  mmodel: {
+    reasoning: false,
+    vision: false,
+    thinkingFormat: "openai",
+    thinkingCanDisable: true,
+    maxOutput: 64000,
+  },
+  // Legacy tier ids still seen on intl catalogs
+  ultimate: QODER_REASONING_CAPS,
+  performance: QODER_REASONING_CAPS,
+  efficient: QODER_REASONING_CAPS,
+  lite: QODER_REASONING_CAPS,
 };
 
 /**
@@ -181,22 +208,9 @@ export const PROVIDER_CAPABILITIES = {
     "deepseek-v4-flash":  { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1000000, maxOutput: 50000 },
     "deepseek-v3-2-volc": { reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 96000, maxOutput: 32000 },
   },
-  // Qoder — wire is openai-like reasoning_effort on private body parameters.
-  // Catalog keys from registry + common frontier/tier ids (list still supplies model_config).
-  "qoder": {
-    "qmodel_latest": QODER_REASONING_CAPS,
-    "qmodel": QODER_REASONING_CAPS,
-    "dmodel": QODER_REASONING_CAPS,
-    "dfmodel": QODER_REASONING_CAPS,
-    "gm51model": QODER_REASONING_CAPS,
-    "kmodel": QODER_REASONING_CAPS,
-    "mmodel": QODER_REASONING_CAPS,
-    "auto": QODER_REASONING_CAPS,
-    "ultimate": QODER_REASONING_CAPS,
-    "performance": QODER_REASONING_CAPS,
-    "efficient": QODER_REASONING_CAPS,
-    "lite": QODER_REASONING_CAPS,
-  },
+  // Qoder family — one caps table; intl + CN share wire (reasoning_effort).
+  qoder: QODER_PROVIDER_MODEL_CAPS,
+  "qoderwork-cn": QODER_PROVIDER_MODEL_CAPS,
 };
 
 /**

@@ -90,6 +90,8 @@ export default function ConnectionRow({
   const authLabel = isOAuthConnection ? "OAuth" : isCookieConnection ? "Cookie" : "API Key";
   const isCodebuddyCnOauth =
     connection.provider === "codebuddy-cn" && isOAuthConnection;
+  const isQoderworkCnOauth =
+    connection.provider === "qoderwork-cn" && isOAuthConnection;
   const phoneMasked =
     (typeof connection.providerSpecificData?.phoneMasked === "string"
       && connection.providerSpecificData.phoneMasked.trim())
@@ -226,7 +228,7 @@ export default function ConnectionRow({
             <Badge variant="default" size="sm">
               {authLabel}
             </Badge>
-            {isCodebuddyCnOauth && (
+            {(isCodebuddyCnOauth || isQoderworkCnOauth) && (
               <Badge
                 variant={checkinBadgeVariant}
                 size="sm"
@@ -235,9 +237,18 @@ export default function ConnectionRow({
                 签到
               </Badge>
             )}
-            {isCodebuddyCnOauth && phoneMasked && (
-              <Badge variant="default" size="sm" title="Masked phone from credential">
+            {(isCodebuddyCnOauth || isQoderworkCnOauth) && phoneMasked && (
+              <Badge variant="default" size="sm" title="Masked phone / login id">
                 {phoneMasked}
+              </Badge>
+            )}
+            {isQoderworkCnOauth && !phoneMasked && connection.providerSpecificData?.loginSource && (
+              <Badge
+                variant="default"
+                size="sm"
+                title="Login source from userinfo"
+              >
+                {String(connection.providerSpecificData.loginSource).replace(/_/g, " ")}
               </Badge>
             )}
             {hasAnyProxy && (

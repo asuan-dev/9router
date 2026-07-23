@@ -32,11 +32,11 @@ export const GEMINI_CONFIG = { ...GOOGLE_OAUTH_CLIENT, ...PROVIDER_OAUTH["gemini
 export const QWEN_CONFIG = { ...PROVIDER_OAUTH["qwen"] };
 
 // Qoder OAuth Configuration (Device Token Flow with PKCE).
-// Device tokens are long-lived (~30 days for access, ~360 for refresh).
-// The upstream refresh endpoint at center.qoder.sh returns 403 for our
-// flow — we accept that and surface it to the user as "re-login" instead
-// of attempting to silently rotate.
+// Device tokens are long-lived; identity refresh uses openapi
+// `/api/v1/deviceToken/refresh` via shared refreshQoderDeviceToken(profile).
+// intl (`qoder`) and CN (`qoderwork-cn`) share the same handler with different profiles.
 export const QODER_CONFIG = { ...PROVIDER_OAUTH["qoder"] };
+export const QODERWORK_CN_CONFIG = { ...PROVIDER_OAUTH["qoderwork-cn"] };
 
 // iFlow OAuth Configuration (Authorization Code)
 export const IFLOW_CONFIG = { ...PROVIDER_OAUTH["iflow"] };
@@ -134,6 +134,7 @@ export const PROVIDERS = {
   GEMINI: "gemini-cli",
   QWEN: "qwen",
   QODER: "qoder",
+  QODERWORK_CN: "qoderwork-cn",
   IFLOW: "iflow",
   ANTIGRAVITY: "antigravity",
   OPENAI: "openai",

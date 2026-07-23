@@ -4,6 +4,7 @@ import "open-sse/index.js";
 import { getProviderConnectionById, updateProviderConnection } from "@/lib/localDb";
 import { getUsageForProvider } from "open-sse/services/usage.js";
 import { getExecutor } from "open-sse/executors/index.js";
+import { isUnrecoverableRefreshError } from "open-sse/services/tokenRefresh.js";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { USAGE_APIKEY_PROVIDERS } from "@/shared/constants/providers";
 
@@ -53,6 +54,12 @@ export async function refreshAndUpdateCredentials(connection, force = false, pro
       return { connection, refreshed: false };
     }
     throw new Error("Failed to refresh credentials. Please re-authorize the connection.");
+  }
+
+  if (isUnrecoverableRefreshError(refreshResult)) {
+    throw new Error(
+      refreshResult.message || "Failed to refresh credentials. Please re-authorize the connection.",
+    );
   }
 
   // Build update object

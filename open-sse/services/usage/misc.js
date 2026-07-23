@@ -207,6 +207,6 @@ export async function getVercelAiGatewayUsage(apiKey, proxyOptions = null) {
   }
 }
 
-export async function getQoderUsage(accessToken, proxyOptions = null) {
-  return getQuota(accessToken, { proxyOptions });
+export async function getQoderUsage(accessToken, proxyOptions = null, profile = null) {
+  return getQuota(accessToken, { proxyOptions, profile });
 }

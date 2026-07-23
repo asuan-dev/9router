@@ -20,6 +20,7 @@ import {
 import { getQuota } from "./quota.js";
 import {
   INTL_PROFILE,
+  CN_WORK_PROFILE,
   DEFAULT_PROFILE,
   PROFILES,
   resolveProfile,
@@ -27,6 +28,7 @@ import {
 
 export {
   INTL_PROFILE,
+  CN_WORK_PROFILE,
   DEFAULT_PROFILE,
   PROFILES,
   resolveProfile,

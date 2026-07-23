@@ -159,6 +159,7 @@ export async function GET(request, { params }) {
         "kilocode",
         "codebuddy-cn",
         "qoder",
+        "qoderwork-cn",
         "grok-cli",
       ];
       let deviceData;
@@ -288,10 +289,9 @@ export async function POST(request, { params }) {
       } else if (provider === "kiro") {
         // Kiro needs extraData (clientId, clientSecret) from device code response
         result = await pollForToken(provider, deviceCode, null, extraData);
-      } else if (provider === "qoder") {
-        // Qoder needs both the PKCE verifier (codeVerifier) and the machineId
-        // captured at device-code time (extraData._qoderMachineId) so
-        // mapTokens can persist it for COSY signing.
+      } else if (provider === "qoder" || provider === "qoderwork-cn") {
+        // Qoder / QoderWork CN: PKCE verifier + machineId from device-code time
+        // (extraData._qoderMachineId) so mapTokens can persist it for COSY signing.
         if (!codeVerifier) {
           return NextResponse.json({ error: "Missing code verifier" }, { status: 400 });
         }

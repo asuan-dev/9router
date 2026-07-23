@@ -387,6 +387,42 @@ const PROVIDER_MODELS_CONFIG = {
       return { models: [], warning };
     },
   },
+  "qoderwork-cn": {
+    customResolver: async (connection) => {
+      const credentials = {
+        accessToken: connection.accessToken,
+        refreshToken: connection.refreshToken,
+        email: connection.email,
+        displayName: connection.displayName,
+        providerSpecificData: connection.providerSpecificData || {},
+      };
+      let warning;
+      try {
+        const result = await resolveQoderModels(credentials, {
+          forceRefresh: true,
+          profile: "cn-work",
+        });
+        if (result?.models?.length) {
+          return {
+            models: result.models.map((m) => ({
+              id: `qoderwork-cn/${m.id}`,
+              name: m.name,
+              contextLength: m.contextLength,
+              isVL: m.isVL,
+              isReasoning: m.isReasoning,
+              maxOutputTokens: m.maxOutputTokens,
+              description: m.description,
+            })),
+          };
+        }
+        warning = "QoderWork CN returned no models; falling back to static catalog.";
+      } catch (error) {
+        warning = `Failed to fetch QoderWork CN models: ${error.message}`;
+        console.log("Failed to fetch QoderWork CN models dynamically, falling back to static:", error.message);
+      }
+      return { models: [], warning };
+    },
+  },
   "gemini-cli": {
     customResolver: buildOAuthResolver({
       refreshFn: (conn) => refreshGoogleToken(conn.refreshToken, GEMINI_CONFIG.clientId, GEMINI_CONFIG.clientSecret),

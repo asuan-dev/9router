@@ -122,7 +122,12 @@ async function fetchQoderCatalogRaw(credentials, signal, proxyOptions = null, pr
     rawConfigs.set(key, entry);
     if (entry.enable === false) continue;
 
-    const display = entry.display_name || key;
+    const display =
+      entry.display_name ||
+      entry.displayName ||
+      entry.name ||
+      entry.title ||
+      key;
     const ctx = Number(entry.max_input_tokens) || 131_072;
     models.push({
       id: key,

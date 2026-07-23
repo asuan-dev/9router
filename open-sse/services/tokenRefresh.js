@@ -13,6 +13,7 @@ import {
   refreshGitHubToken,
   refreshCopilotToken,
   refreshCodebuddyToken,
+  refreshQoderDeviceToken,
   classifyOAuthRefreshError,
 } from "./tokenRefresh/providers.js";
 
@@ -29,6 +30,7 @@ export {
   refreshGitHubToken,
   refreshCopilotToken,
   refreshCodebuddyToken,
+  refreshQoderDeviceToken,
   classifyOAuthRefreshError,
 };
 
@@ -134,11 +136,11 @@ const REFRESH_HANDLERS = {
   github: (c, log) => refreshGitHubToken(c.refreshToken, log),
   kiro: (c, log) => refreshKiroToken(c.refreshToken, c.providerSpecificData, log),
   xai: (c, log) => refreshXaiToken(c.refreshToken, log),
-  // Grok CLI shares xAI OAuth client + token endpoint (device-code tokens refresh the same way)
   "grok-cli": (c, log) => refreshXaiToken(c.refreshToken, log),
   gcli: (c, log) => refreshXaiToken(c.refreshToken, log),
   "codebuddy-cn": (c, log) => refreshCodebuddyToken(c.refreshToken, log),
-  // Kimi Code OAuth (merged into id `kimi`); legacy id still routes here
+  qoder: (c, log) => refreshQoderDeviceToken(c.refreshToken, "intl", log),
+  "qoderwork-cn": (c, log) => refreshQoderDeviceToken(c.refreshToken, "cn-work", log),
   kimi: (c, log) => refreshKimiToken(c.refreshToken, c, log),
   "kimi-coding": (c, log) => refreshKimiToken(c.refreshToken, c, log),
   vertex: vertexRefreshHandler,

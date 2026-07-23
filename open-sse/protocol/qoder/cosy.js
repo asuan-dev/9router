@@ -1,5 +1,5 @@
 /**
- * Qoder COSY (hybrid RSA+AES+MD5) signing, protocol core; Cosy sign aligned with Qoder IDE 1.17.3 / QoderWork CN (space delimiter)
+ * Qoder COSY (hybrid RSA+AES+MD5) signing, protocol core; Cosy sign aligned with Qoder IDE 1.17.3 / QoderWork CN (newline delimiter for CN, space for intl)
  * qoder-provider branch (internal/auth/qoder/cosy.go).
  *
  * Every signed request carries:
@@ -132,14 +132,19 @@ export function buildCosyHeaders(body, requestUrl, creds, profile = null) {
     version: "v1",
     requestId,
     info,
-    cosyVersion: p.ideVersion,
-    ideVersion: "",
+    cosyVersion: p.ideVersion || "1.0.0",
+    // Desktop generateAuthToken uses ideVersion || "1.0.0" (not empty).
+    ideVersion: p.ideVersion || "1.0.0",
   });
   const payloadB64 = Buffer.from(payloadJson, "utf8").toString("base64");
 
   const sigPath = computeSigPath(requestUrl);
-  // MD5 field join: space (current). CLIProxy/qoder2api use \\n — SEP not dual-moded; nail with live capture if 403.
-  const sigInput = `${payloadB64} ${cosyKey} ${timestamp} ${bodyBuf.toString("latin1")} ${sigPath}`;
+  // Field join must match the target product:
+  // - intl (qodercli / historical 9r): space
+  // - QoderWork CN desktop generateAuthToken: newline between fields
+  // Wrong SEP → upstream HTTP 403 {"code":"101","message":"Signature invalid"}
+  const sep = p.id === "cn-work" ? "\n" : " ";
+  const sigInput = `${payloadB64}${sep}${cosyKey}${sep}${timestamp}${sep}${bodyBuf.toString("latin1")}${sep}${sigPath}`;
   const sig = md5Hex(Buffer.from(sigInput, "latin1"));
 
   const machineId = creds.machineId || generateMachineId();
@@ -154,6 +159,7 @@ export function buildCosyHeaders(body, requestUrl, creds, profile = null) {
     "Cosy-Version": p.ideVersion,
     "Cosy-Machineid": machineId,
     "Cosy-Machinetoken": machineId,
+    "Cosy-MachineCode": machineId,
     "Cosy-Machinetype": p.machineType,
     "Cosy-Machineos": p.machineOs,
     "Cosy-Clienttype": p.clientType,

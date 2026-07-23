@@ -19,6 +19,7 @@
 import { createHash, randomUUID } from "crypto";
 import { getQoderModelConfig, resolveQoderModels } from "./catalog.js";
 import { resolveProfile } from "./profile.js";
+import { resolveSessionId } from "../../utils/sessionManager.js";
 
 /** Official free-chat shell (awA). image_urls filled when vision parts present. */
 const SHELL = {
@@ -30,13 +31,10 @@ const SHELL = {
   version: "3",
   agent_id: "agent_common",
   task_id: "common",
-  code_language: "",
-  chat_prompt: "",
   image_urls: null,
   aliyun_user_type: "",
 };
 
-const EFFORT_SET = new Set(["none", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
 /** Message-level fields kept when present (core Chat / wire overlap). */
 const MESSAGE_PASSTHROUGH = [
@@ -246,7 +244,9 @@ function truncate(s, n) {
 }
 
 /**
- * Resolve Chat reasoning_effort → Qoder parameters.reasoning_effort.
+ * Resolve Chat reasoning_effort → Qoder parameters.reasoning_effort (pure passthrough).
+ * Accepts whatever the client sends and forwards it verbatim; only normalizes the
+ * common disabled/off→none alias and drops auto/empty (server default). No filtering.
  * @returns {string|undefined}
  */
 function resolveReasoningEffort(body) {
@@ -258,11 +258,10 @@ function resolveReasoningEffort(body) {
   if (raw == null) return undefined;
   const v = String(raw).trim().toLowerCase();
   if (!v) return undefined;
-  if (EFFORT_SET.has(v)) return v;
-  // Common aliases
+  if (v === "disabled" || v === "off") return "none";
   if (v === "x-high") return "xhigh";
   if (v === "auto") return undefined;
-  return undefined;
+  return v;
 }
 
 /**
@@ -281,6 +280,28 @@ function buildChatContext(lastUser, qoderKey, isReasoning, imageUrls = null) {
     chatPrompt: "",
     imageUrls: imageUrls && imageUrls.length ? imageUrls : null,
   };
+}
+
+/**
+ * Resolve the context window to advertise as parameters.context_length when the
+ * client does not pass one. Mirrors CN desktop: pick from the model's
+ * context_config tiers (e.g. 200K/400K/1M); we use the LARGEST tier so long
+ * conversations are not prematurely compacted. Falls back to max_input_tokens.
+ * @param {object} modelConfig - live model_config block (has context_config / max_input_tokens)
+ * @returns {number|undefined}
+ */
+function resolveMaxContextLen(modelConfig) {
+  const cc = modelConfig?.context_config;
+  if (cc && typeof cc === "object") {
+    let max = 0;
+    for (const tier of Object.values(cc)) {
+      const n = Number(tier?.token_count);
+      if (Number.isFinite(n) && n > max) max = n;
+    }
+    if (max > 0) return max;
+  }
+  const mit = Number(modelConfig?.max_input_tokens);
+  return Number.isFinite(mit) && mit > 0 ? mit : undefined;
 }
 
 /**
@@ -357,20 +378,50 @@ async function buildQoderRequestBody({
   const psd = credentials?.providerSpecificData || {};
   // awA: request_id / request_set_id / chat_record_id share one id by default.
   const requestId = randomUUID();
-  const sessionId = stableHash("qoder-session", psd.userId, qoderKey);
+  // Conversation-stable session id: client-provided id > assistant-text fingerprint > connection fallback.
+  // Mirrors CN desktop (one UUID per conversation) as closely as Chat Completions allows.
+  const sessionId = resolveSessionId({
+    headers: credentials?.rawHeaders,
+    body,
+    connectionId: credentials?.connectionId || psd.userId || qoderKey,
+    scope: "qoder",
+  });
 
   const parameters = { max_tokens: maxTokens };
   const effort = resolveReasoningEffort(body);
   if (effort !== undefined) parameters.reasoning_effort = effort;
+  else if (isReasoning) parameters.reasoning_effort = "high"; // default when client omits
+  // CN: max_thinking_tokens only sent when is_reasoning && thinkingBudget defined.
+  if (isReasoning && typeof body?.max_thinking_tokens === "number") {
+    parameters.max_thinking_tokens = body.max_thinking_tokens;
+  }
   if (typeof body?.tool_choice !== "undefined") parameters.tool_choice = body.tool_choice;
-  // Optional context window (official: parameters.context_length from contextWindow).
+  // Context window (official: parameters.context_length). Client value wins; else the
+  // model's largest context_config tier (CN desktop sends its selected tier here).
   if (typeof body?.context_length === "number" && body.context_length > 0) {
     parameters.context_length = body.context_length;
   } else if (typeof body?.contextWindow === "number" && body.contextWindow > 0) {
     parameters.context_length = body.contextWindow;
+  } else {
+    const ctxLen = resolveMaxContextLen(modelConfig);
+    if (ctxLen) parameters.context_length = ctxLen;
   }
 
   const shellImageUrls = imageUrls.length ? imageUrls : null;
+
+  // CN desktop (JnI) trims model_config to 10 fields; strip garbage before sending.
+  const trimmedModelConfig = {
+    key: modelConfig.key || qoderKey,
+    display_name: modelConfig.display_name || modelConfig.displayName || qoderKey,
+    model: "",
+    format: modelConfig.format || "openai",
+    is_vl: !!modelConfig.is_vl,
+    is_reasoning: !!modelConfig.is_reasoning,
+    api_key: "",
+    url: "",
+    source: modelConfig.source || "system",
+    max_input_tokens: modelConfig.max_input_tokens ?? 200000,
+  };
 
   const payload = {
     request_id: requestId,
@@ -380,7 +431,7 @@ async function buildQoderRequestBody({
     ...SHELL,
     image_urls: shellImageUrls,
     session_type: p.sessionType,
-    model_config: modelConfig,
+    model_config: trimmedModelConfig,
     system: systemText,
     messages,
     tools,
@@ -393,7 +444,7 @@ async function buildQoderRequestBody({
     payload.business = {
       product: p.businessProduct,
       version: p.businessVersion,
-      type: "agent",
+      type: p.businessType || "agent",
       stage: "start",
       id: randomUUID(),
       name: truncate(lastUser, 30),

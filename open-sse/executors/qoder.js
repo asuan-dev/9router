@@ -1,31 +1,31 @@
 /**
  * QoderExecutor — thin adapter over open-sse/protocol/qoder.
  *
- * Protocol owns Cosy sign, encode, body shape, SSE unwrap, catalog, quota.
- * Token refresh: not supported for device tokens (upstream 403); re-login required.
- * Profile: from provider config protocolProfile (default intl).
+ * Shared for providers: qoder (intl) and qoderwork-cn (CN Profile).
+ * Identity refresh: openapi deviceToken/refresh via tokenRefresh handlers.
  */
 
 import { BaseExecutor } from "./base.js";
 import { PROVIDERS } from "../config/providers.js";
 import { chat as qoderChat } from "../protocol/qoder/index.js";
+import { refreshQoderDeviceToken } from "../services/tokenRefresh/providers.js";
+import { shouldRefreshCredentials } from "../services/oauthCredentialManager.js";
 
 export class QoderExecutor extends BaseExecutor {
   constructor(providerId = "qoder", config = null) {
-    super(providerId, config || PROVIDERS.qoder || PROVIDERS[providerId]);
+    super(providerId, config || PROVIDERS[providerId] || PROVIDERS.qoder);
   }
 
-  /** @returns {string} */
+  /** @returns {string} profile id for protocol.resolveProfile */
   getProtocolProfile() {
     return (
       this.config?.protocolProfile ||
       this.config?.protocol?.profile ||
-      "intl"
+      (this.provider === "qoderwork-cn" ? "cn-work" : "intl")
     );
   }
 
   buildUrl() {
-    // Real URL comes from profile inside protocol.chat; keep registry base for BaseExecutor fallbacks.
     return this.config?.baseUrl || "";
   }
 
@@ -43,13 +43,17 @@ export class QoderExecutor extends BaseExecutor {
     });
   }
 
-  /** Device tokens do not refresh; callers must re-auth on 401. */
-  async refreshCredentials() {
-    return null;
+  needsRefresh(credentials) {
+    return shouldRefreshCredentials(this.provider, credentials);
   }
 
-  needsRefresh() {
-    return false;
+  async refreshCredentials(credentials, log, proxyOptions = null) {
+    if (!credentials?.refreshToken) return null;
+    return refreshQoderDeviceToken(
+      credentials.refreshToken,
+      this.getProtocolProfile(),
+      log,
+    );
   }
 }
 

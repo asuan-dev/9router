@@ -1,15 +1,19 @@
 import { NextResponse } from "next/server";
 import { getProviderConnectionById, updateProviderConnection } from "@/models";
 import { extractCodebuddyProfileFromToken } from "@/shared/utils/codebuddyProfile";
+import {
+  extractQoderworkProfileFromUserinfo,
+  mapQoderworkCheckinStatus,
+  shanghaiDayKey,
+} from "@/shared/utils/qoderworkProfile";
+import { getQoderworkCheckinStatus } from "open-sse/services/activities/qoderwork-cn.js";
 
 export const dynamic = "force-dynamic";
 
 /**
  * POST /api/providers/[id]/refresh-profile
- * Manual profile refresh for CodeBuddy CN OAuth connections:
- * - name ← JWT nickname (when present)
- * - providerSpecificData.phoneMasked ← masked preferred_username phone
- * Does not change OAuth tokens. Local UX only.
+ * - codebuddy-cn: JWT nickname + masked phone
+ * - qoderwork-cn: userinfo name + optional phone-like mask; sash check-in status badges
  */
 export async function POST(_request, { params }) {
   try {
@@ -19,92 +23,137 @@ export async function POST(_request, { params }) {
       return NextResponse.json({ error: "Connection not found" }, { status: 404 });
     }
 
-    if (existing.provider !== "codebuddy-cn") {
-      return NextResponse.json(
-        { error: "Profile refresh is only supported for CodeBuddy CN" },
-        { status: 400 },
-      );
-    }
-
     if (existing.authType !== "oauth") {
       return NextResponse.json(
-        { error: "Profile refresh requires an OAuth connection" },
+        { error: "Only OAuth connections support profile refresh" },
         { status: 400 },
       );
     }
 
     const accessToken = existing.accessToken;
     if (!accessToken || typeof accessToken !== "string") {
-      return NextResponse.json(
-        { error: "No access token available for this connection" },
-        { status: 400 },
-      );
+      return NextResponse.json({ error: "Missing access token" }, { status: 401 });
     }
 
-    const profile = extractCodebuddyProfileFromToken(accessToken);
-    if (!profile.nickname && !profile.phoneMasked) {
-      return NextResponse.json(
-        { error: "Could not parse nickname or phone from credential" },
-        { status: 422 },
-      );
-    }
-
-    const updateData = {
-      providerSpecificData: {
-        ...(existing.providerSpecificData || {}),
-        profileRefreshedAt: new Date().toISOString(),
-      },
-    };
-
-    if (profile.nickname) {
-      updateData.name = profile.nickname;
-    }
-    if (profile.phoneMasked) {
-      // Store masked form for list UI; keep full phone only in DB-side field if present
-      updateData.providerSpecificData.phoneMasked = profile.phoneMasked;
-      if (profile.phone) {
-        updateData.providerSpecificData.phone = profile.phone;
+    if (existing.provider === "codebuddy-cn") {
+      const profile = extractCodebuddyProfileFromToken(accessToken);
+      if (!profile.nickname && !profile.phoneMasked) {
+        return NextResponse.json(
+          { error: "No profile fields found in token" },
+          { status: 422 },
+        );
       }
-    }
-    if (profile.sub) {
-      updateData.providerSpecificData.uid = profile.sub;
-    }
-
-    const updated = await updateProviderConnection(id, {
-      ...updateData,
-      // merge providerSpecificData carefully: updateProviderConnection shallow-merges top-level
-      // so pass merged PSD as a whole (connectionsRepo merges { ...existing, ...data })
-      providerSpecificData: {
-        ...(existing.providerSpecificData || {}),
-        ...updateData.providerSpecificData,
-      },
-      ...(updateData.name ? { name: updateData.name } : {}),
-    });
-
-    if (!updated) {
-      return NextResponse.json({ error: "Failed to update connection" }, { status: 500 });
-    }
-
-    const result = { ...updated };
-    delete result.apiKey;
-    delete result.accessToken;
-    delete result.refreshToken;
-    delete result.idToken;
-    // Never return full phone to the client
-    if (result.providerSpecificData?.phone) {
-      const { phone, ...restPsd } = result.providerSpecificData;
-      result.providerSpecificData = restPsd;
+      const updateData = {
+        providerSpecificData: { ...(existing.providerSpecificData || {}) },
+      };
+      if (profile.nickname) updateData.name = profile.nickname;
+      if (profile.phoneMasked) {
+        updateData.providerSpecificData.phoneMasked = profile.phoneMasked;
+        // store full phone only server-side; list API strips it
+        if (profile.phone) updateData.providerSpecificData.phone = profile.phone;
+      }
+      if (profile.sub) updateData.providerSpecificData.uid = profile.sub;
+      const updated = await updateProviderConnection(id, updateData);
+      if (!updated) {
+        return NextResponse.json({ error: "Failed to update connection" }, { status: 500 });
+      }
+      const result = { ...updated };
+      delete result.apiKey;
+      delete result.accessToken;
+      delete result.refreshToken;
+      delete result.idToken;
+      if (result.providerSpecificData?.phone) {
+        const { phone, ...rest } = result.providerSpecificData;
+        result.providerSpecificData = rest;
+      }
+      return NextResponse.json({ success: true, connection: result });
     }
 
-    return NextResponse.json({
-      connection: result,
-      refreshed: {
-        name: Boolean(profile.nickname),
-        phoneMasked: Boolean(profile.phoneMasked),
-      },
-    });
+    if (existing.provider === "qoderwork-cn") {
+      const { QoderService } = await import("@/lib/oauth/services/qoder");
+      const svc = new QoderService({ profile: "cn-work" });
+      const userinfoRaw = await svc.fetchUserInfo(accessToken);
+      // fetchUserInfo currently returns only name/email/org — call openapi for full body
+      let full = null;
+      try {
+        const res = await fetch("https://openapi.qoder.com.cn/api/v1/userinfo", {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            Accept: "application/json",
+            "User-Agent": "QoderWork",
+          },
+        });
+        if (res.ok) full = await res.json();
+      } catch {
+        full = null;
+      }
+      if (!full) {
+        full = {
+          name: userinfoRaw?.name,
+          email: userinfoRaw?.email,
+          id: existing.providerSpecificData?.userId,
+        };
+      }
+      const profile = extractQoderworkProfileFromUserinfo(full);
+      const dayKey = shanghaiDayKey();
+      const checkin = await getQoderworkCheckinStatus(accessToken, null);
+      const checkinFields =
+        checkin?.ok && checkin.data
+          ? mapQoderworkCheckinStatus(checkin.data, dayKey)
+          : checkin?.ok && checkin.body
+            ? mapQoderworkCheckinStatus(checkin.body, dayKey)
+            : {};
+
+      const updateData = {
+        providerSpecificData: {
+          ...(existing.providerSpecificData || {}),
+          ...checkinFields,
+        },
+      };
+      if (profile.displayName) {
+        updateData.name = profile.displayName;
+        updateData.displayName = profile.displayName;
+      }
+      if (profile.phoneMasked) {
+        updateData.providerSpecificData.phoneMasked = profile.phoneMasked;
+        if (profile.phone) updateData.providerSpecificData.phone = profile.phone;
+      }
+      if (profile.loginSource) {
+        updateData.providerSpecificData.loginSource = profile.loginSource;
+      }
+      if (profile.userId) {
+        updateData.providerSpecificData.userId = profile.userId;
+      }
+
+      const updated = await updateProviderConnection(id, updateData);
+      if (!updated) {
+        return NextResponse.json({ error: "Failed to update connection" }, { status: 500 });
+      }
+      const result = { ...updated };
+      delete result.apiKey;
+      delete result.accessToken;
+      delete result.refreshToken;
+      delete result.idToken;
+      if (result.providerSpecificData?.phone) {
+        const { phone, ...rest } = result.providerSpecificData;
+        result.providerSpecificData = rest;
+      }
+      return NextResponse.json({
+        success: true,
+        connection: result,
+        checkinOk: !!checkin?.ok,
+      });
+    }
+
+    return NextResponse.json(
+      { error: `Profile refresh not supported for provider ${existing.provider}` },
+      { status: 400 },
+    );
   } catch (error) {
-    console.log("Error refreshing connection profile:", error);
-    return NextResponse.json({ error: "Failed to refresh profile" }, { status: 500 });
+    console.log("Error refreshing profile:", error);
+    return NextResponse.json(
+      { error: error.message || "Failed to refresh profile" },
+      { status: 500 },
+    );
   }
 }

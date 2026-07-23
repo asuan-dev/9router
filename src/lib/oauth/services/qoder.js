@@ -1,28 +1,15 @@
 import {
-  INTL_PROFILE,
   resolveProfile,
 } from "../../../../open-sse/protocol/qoder/index.js";
 import crypto from "crypto";
 
 /**
- * Qoder OAuth Service
- * Implements the device-token flow:
- *   1. Generate PKCE pair + nonce + machine_id locally.
- *   2. Open login URL (profile.loginUrl) in the user's browser.
- *   3. Poll profile.deviceTokenUrl until the user authorizes
- *      and the upstream returns a `dt-...` access token.
+ * Qoder OAuth Service — device-token flow + openapi deviceToken refresh.
+ * URLs from protocol Profile (intl | cn-work). Protocol chat stays separate.
  *
- * Tokens live ~30 days; refresh is a no-op (the upstream refresh endpoint
- * returns 403 for our flow). Users re-run login when expired.
- *
- * Mirrors the structure of KiroService — COSY / encode / chat live in
- * open-sse/protocol/qoder/ (protocol module). OAuth only acquires credentials.
- * URLs come from the protocol Profile (default intl).
+ * CN evidence: lab/qoderwork-cn/references/wire-profile-cn.md
  */
 
-// Timeout for OAuth helper calls. The OAuth modal polls every 2s for up to
-// 5 minutes; an individual request that stalls beyond this is treated as a
-// failed poll attempt and the next poll iteration retries.
 const FETCH_TIMEOUT_MS = 15_000;
 
 function base64Url(buf) {
@@ -33,11 +20,6 @@ function base64Url(buf) {
     .replace(/\//g, "_");
 }
 
-/**
- * Wrap fetch with an AbortController-based timeout. Without this, a stalled
- * upstream socket hangs on Node's default keepalive timeout (minutes) and
- * abandoned polls accumulate hung sockets.
- */
 async function fetchWithTimeout(url, init = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort("timeout"), FETCH_TIMEOUT_MS);
@@ -56,31 +38,46 @@ export class QoderService {
     this.profile = resolveProfile(options.profile ?? null);
   }
 
-  /**
-   * Generate a PKCE verifier + S256 challenge pair.
-   * Uses 32 random bytes (matches qodercli/Veria).
-   */
   generatePkcePair() {
-    const verifier = base64Url(crypto.randomBytes(32));
+    // Match QoderWork CN desktop (main.js generatePKCE$1): unreserved
+    // charset, length 43–128, S256 challenge as base64url.
+    const charset =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+    const len = 43 + Math.floor(Math.random() * 86);
+    const bytes = crypto.randomBytes(len);
+    let verifier = "";
+    for (let i = 0; i < len; i++) verifier += charset[bytes[i] % charset.length];
     const challenge = base64Url(crypto.createHash("sha256").update(verifier).digest());
     return { verifier, challenge };
   }
 
   /**
-   * Initiate the device flow. Returns the URL to open in a browser plus the
-   * verifier/nonce/machineId we'll need to poll and to sign future requests.
+   * Initiate the device flow.
+   * CN requires client_id + redirect_uri on the login URL.
    */
   initiateDeviceFlow() {
     const { verifier, challenge } = this.generatePkcePair();
     const nonce = crypto.randomUUID();
     const machineId = crypto.randomUUID();
 
-    const params = new URLSearchParams({
-      challenge,
-      challenge_method: "S256",
-      machine_id: machineId,
-      nonce,
-    });
+    // Param order/names match desktop startDeviceFlow (selectAccounts).
+    const params = new URLSearchParams();
+    params.set("challenge", challenge);
+    params.set("challenge_method", "S256");
+    params.set("nonce", nonce);
+    params.set("machine_id", machineId);
+
+    // CN rejects bare login URL ("参数无效") without client_id + redirect_uri.
+    const clientId = this.profile.deviceClientId || null;
+    const redirectUri = this.profile.deviceRedirectUri || null;
+    if (clientId) params.set("client_id", clientId);
+    if (redirectUri) params.set("redirect_uri", redirectUri);
+
+    if (this.profile.id === "cn-work" && (!clientId || !redirectUri)) {
+      throw new Error(
+        "qoder cn-work device flow requires deviceClientId and deviceRedirectUri on profile",
+      );
+    }
 
     return {
       verificationUriComplete: `${this.profile.loginUrl}?${params.toString()}`,
@@ -91,12 +88,7 @@ export class QoderService {
   }
 
   /**
-   * Single poll attempt. Returns one of:
-   *   { status: "pending" }       — keep polling
-   *   { status: "ok", token, ... } — user authorized, tokens captured
-   *   throws Error                 — terminal failure
-   *
-   * Upstream returns 202/404 while waiting; 200 with a JSON body when done.
+   * @returns {Promise<{ status: "pending" } | { status: "ok", accessToken: string, refreshToken: string, userId: string, expireTime: number, rawResponse: object }>}
    */
   async pollDeviceToken({ nonce, codeVerifier }) {
     if (!nonce || !codeVerifier) {
@@ -112,8 +104,6 @@ export class QoderService {
       },
     });
 
-    // Pending — server has registered the device code but the user hasn't
-    // finished the browser flow yet. Both 202 and 404 mean "keep polling".
     if (response.status === 202 || response.status === 404) {
       return { status: "pending" };
     }
@@ -125,7 +115,9 @@ export class QoderService {
       try {
         const body = JSON.parse(text);
         if (body.message) message = `Qoder device token poll failed: ${body.message}`;
-      } catch {}
+      } catch {
+        /* keep */
+      }
       throw new Error(message);
     }
 
@@ -136,7 +128,6 @@ export class QoderService {
       throw new Error(`Qoder device token poll: invalid JSON response (${err.message})`);
     }
 
-    // Defensive: 200 + empty token means the upstream changed shape.
     if (!body.token) {
       throw new Error("Qoder device token poll returned 200 but no token");
     }
@@ -153,10 +144,6 @@ export class QoderService {
     };
   }
 
-  /**
-   * Fetch profile info for the freshly-issued token. Best-effort — failures
-   * shouldn't block login; returning empty strings is fine.
-   */
   async fetchUserInfo(accessToken) {
     try {
       const response = await fetchWithTimeout(this.profile.userInfoUrl, {
@@ -180,29 +167,78 @@ export class QoderService {
   }
 
   /**
-   * Convert the upstream's expiry hint into a Unix-millisecond timestamp.
-   * Accepts:
-   *   - numeric (ms-epoch): returned as-is
-   *   - numeric string of ms-epoch: e.g. "1781594470000"
-   *   - RFC3339 string: e.g. "2026-06-16T07:15:04Z"
-   *   - seconds-from-now via expiresInSeconds (>= 0)
-   * Falls back to "now + 30 days" when both are missing.
+   * POST openapi /api/v1/deviceToken/refresh
+   * Response: device_token|token + refresh_token (CN desktop).
    *
-   * Order matters: try numeric (string or number) before Date.parse, since
-   * Date.parse accepts short numeric strings like "2026" as years and would
-   * otherwise return a misleading year-2026 timestamp instead of falling
-   * through to the integer branch.
-   *
-   * Static so callers (and tests) can use it without instantiating.
+   * @param {string} refreshToken
+   * @returns {Promise<{ accessToken: string, refreshToken: string, expiresIn: number, expireTime: number }>}
    */
+  async refreshDeviceToken(refreshToken) {
+    if (!refreshToken) {
+      throw new Error("refreshDeviceToken: missing refresh token");
+    }
+    const url = this.profile.refreshTokenUrl;
+    if (!url) {
+      throw new Error("refreshDeviceToken: profile has no refreshTokenUrl");
+    }
+
+    const response = await fetchWithTimeout(url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        "User-Agent": "Go-http-client/2.0",
+      },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+
+    const text = await response.text();
+    let body = null;
+    try {
+      body = text ? JSON.parse(text) : null;
+    } catch {
+      body = null;
+    }
+
+    if (!response.ok) {
+      const msg =
+        (body && (body.message || body.error_description || body.error)) ||
+        `HTTP ${response.status}`;
+      const err = new Error(`Qoder device token refresh failed: ${msg}`);
+      err.status = response.status;
+      err.body = body;
+      throw err;
+    }
+
+    const access =
+      (body && (body.device_token || body.token || body.access_token)) || null;
+    const nextRefresh =
+      (body && (body.refresh_token || body.refreshToken)) || refreshToken;
+    if (!access || typeof access !== "string") {
+      throw new Error("Qoder device token refresh: missing device_token/token");
+    }
+
+    const expireMs = QoderService.parseExpiry(
+      body?.expires_at || body?.expiresAt,
+      body?.expires_in ?? body?.expiresIn,
+    );
+    const expiresIn = Math.max(60, Math.floor((expireMs - Date.now()) / 1000));
+
+    return {
+      accessToken: access,
+      refreshToken: nextRefresh,
+      expiresIn,
+      expireTime: expireMs,
+      rawResponse: body,
+    };
+  }
+
   static parseExpiry(expiresAt, expiresInSeconds) {
     if (typeof expiresAt === "number" && Number.isFinite(expiresAt) && expiresAt > 0) {
       return expiresAt;
     }
     const trimmed = typeof expiresAt === "string" ? expiresAt.trim() : "";
     if (trimmed) {
-      // Pure numeric string → ms-epoch (don't let Date.parse swallow short
-      // numerics as years).
       if (/^\d+$/.test(trimmed)) {
         const ms = Number.parseInt(trimmed, 10);
         if (Number.isFinite(ms) && ms > 0) return ms;
@@ -210,14 +246,15 @@ export class QoderService {
       const parsed = Date.parse(trimmed);
       if (!Number.isNaN(parsed)) return parsed;
     }
-    // expiresInSeconds === 0 means "already expired"; honor that by returning
-    // the current time rather than fabricating a 30-day default.
-    if (typeof expiresInSeconds === "number" && Number.isFinite(expiresInSeconds) && expiresInSeconds >= 0) {
+    if (
+      typeof expiresInSeconds === "number" &&
+      Number.isFinite(expiresInSeconds) &&
+      expiresInSeconds >= 0
+    ) {
       return Date.now() + expiresInSeconds * 1000;
     }
     return Date.now() + 30 * 24 * 60 * 60 * 1000;
   }
 }
 
-/** Default intl profile export for callers that need login host without constructing. */
-export { INTL_PROFILE };
+export { resolveProfile };

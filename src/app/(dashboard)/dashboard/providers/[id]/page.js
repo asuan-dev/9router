@@ -69,6 +69,8 @@ export default function ProviderDetailPage() {
   const [thinkingMode, setThinkingMode] = useState("auto");
   const [autoPing, setAutoPing] = useState({ enabled: false, connections: {} });
   const [autoCheckinEnabled, setAutoCheckinEnabled] = useState(false);
+  const [qoderworkActivityBusy, setQoderworkActivityBusy] = useState(false);
+  const [qoderworkActivityMsg, setQoderworkActivityMsg] = useState("");
   const [refreshingAllProfiles, setRefreshingAllProfiles] = useState(false);
   const [suggestedModels, setSuggestedModels] = useState([]);
   const [liveModels, setLiveModels] = useState([]);
@@ -508,7 +510,7 @@ export default function ProviderDetailPage() {
   };
 
   const handleRefreshAllProfiles = async () => {
-    if (providerId !== "codebuddy-cn" || refreshingAllProfiles) return;
+    if ((providerId !== "codebuddy-cn" && providerId !== "qoderwork-cn") || refreshingAllProfiles) return;
     const targets = connections.filter((c) => c.authType === "oauth");
     if (targets.length === 0) return;
     setRefreshingAllProfiles(true);
@@ -528,6 +530,33 @@ export default function ProviderDetailPage() {
     fetchCustomModels();
     fetchDisabledModels();
   }, [fetchConnections, fetchAliases, fetchCustomModels, fetchDisabledModels]);
+
+
+  async function runQoderworkCnActivity(connectionId, action) {
+    if (!connectionId || !action) return;
+    setQoderworkActivityBusy(true);
+    setQoderworkActivityMsg("");
+    try {
+      const res = await fetch("/api/providers/qoderwork-cn/activity", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ connectionId, action }),
+      });
+      const data = await res.json().catch(() => ({}));
+      setQoderworkActivityMsg(
+        data.ok
+          ? `${action}: ok`
+          : `${action}: ${data.message || data.error || res.status}`,
+      );
+      if (data.ok && (action === "checkin-status" || action === "checkin-claim")) {
+        await handleRefreshProfile(connectionId);
+      }
+    } catch (e) {
+      setQoderworkActivityMsg(`${action}: ${e.message || e}`);
+    } finally {
+      setQoderworkActivityBusy(false);
+    }
+  }
 
   // Event-driven badge update: only when scheduler gets an upstream check-in response.
   useEffect(() => {
@@ -623,12 +652,17 @@ export default function ProviderDetailPage() {
     }
   };
 
-  const handleAddCustomModel = async (modelId, type = "llm", providerAliasOverride = providerStorageAlias) => {
+  const handleAddCustomModel = async (modelId, type = "llm", providerAliasOverride = providerStorageAlias, name = null) => {
     try {
       const res = await fetch("/api/models/custom", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ providerAlias: providerAliasOverride, id: modelId, type }),
+        body: JSON.stringify({
+          providerAlias: providerAliasOverride,
+          id: modelId,
+          type,
+          ...(name ? { name } : {}),
+        }),
       });
       if (res.ok) {
         await fetchCustomModels();
@@ -682,22 +716,21 @@ export default function ProviderDetailPage() {
       for (const model of models) {
         const modelId = model.id || model.name;
         if (!modelId) continue;
-        
-        // Qoder model ID format may be "qoder/auto" or "auto", need to remove prefix
-        const cleanModelId = modelId.replace(/^qoder\//, "");
-        const alreadyExists = customModels.some(
-          (entry) => entry.providerAlias === providerStorageAlias && entry.id === cleanModelId && (entry.kind || entry.type || "llm") === "llm"
-        ) || Object.values(modelAliases).includes(`${providerStorageAlias}/${cleanModelId}`);
-        if (alreadyExists) {
-          continue;
-        }
 
-        await handleAddCustomModel(cleanModelId, "llm", providerStorageAlias);
+        // "qoder/auto" or "qoderwork-cn/auto" → bare key
+        const cleanModelId = String(modelId).replace(/^qoder(?:work-cn)?\//, "");
+        // Live catalog display_name (Qwen3.8-Max-Preview, DeepSeek-V4-Pro, ...)
+        const displayName =
+          (model.name && String(model.name).trim()) ||
+          cleanModelId.replace(/^qoder(?:work-cn)?\//, "");
+
+        // Always upsert so re-fetch refreshes human-readable names.
+        await handleAddCustomModel(cleanModelId, "llm", providerStorageAlias, displayName);
         importedCount += 1;
       }
-      
+
       if (importedCount === 0) {
-        alert(translate("All models already exist, no new models added"));
+        alert(translate("No models returned"));
       } else {
         alert(translate("Successfully added") + ` ${importedCount} ` + translate("models"));
       }
@@ -1271,7 +1304,7 @@ export default function ProviderDetailPage() {
         </button>
 
         {/* Import Qoder models button — only show for qoder provider */}
-        {providerId === "qoder" && connections.some((conn) => conn.isActive !== false) && (
+        {(providerId === "qoder" || providerId === "qoderwork-cn") && connections.some((conn) => conn.isActive !== false) && (
           <button
             onClick={handleImportQoderModels}
             disabled={importingQoderModels}
@@ -1280,7 +1313,7 @@ export default function ProviderDetailPage() {
             <span className="material-symbols-outlined text-sm" style={importingQoderModels ? { animation: "spin 1s linear infinite" } : undefined}>
               {importingQoderModels ? "progress_activity" : "download"}
             </span>
-            {importingQoderModels ? translate("Fetching...") : translate("Fetch Qoder Models")}
+            {importingQoderModels ? translate("Fetching...") : (providerId === "qoderwork-cn" ? "获取 QoderWork 模型" : translate("Fetch Qoder Models"))}
           </button>
         )}
 
@@ -1567,7 +1600,34 @@ export default function ProviderDetailPage() {
                   )}
                 </>
               )}
-              {providerId === "codebuddy-cn" && connections.some((c) => c.authType === "oauth") && (
+              
+              {providerId === "qoderwork-cn" && connections.some((c) => c.authType === "oauth") && (
+                <div className="mb-4 rounded-lg border border-border p-3 space-y-2">
+                  <div className="text-sm font-medium">QoderWork CN 活动</div>
+                  <div className="flex flex-wrap gap-2">
+                    {connections.filter((c) => c.authType === "oauth").slice(0, 3).map((c) => (
+                      <div key={c.id} className="flex flex-wrap gap-1 items-center">
+                        <span className="text-xs text-muted-foreground">{c.name || c.email || c.id.slice(0, 8)}</span>
+                        <button type="button" className="text-xs px-2 py-1 rounded border" disabled={qoderworkActivityBusy}
+                          onClick={() => runQoderworkCnActivity(c.id, "checkin-status")}>签到状态</button>
+                        <button type="button" className="text-xs px-2 py-1 rounded border" disabled={qoderworkActivityBusy}
+                          onClick={() => runQoderworkCnActivity(c.id, "checkin-claim")}>签到</button>
+                        <button type="button" className="text-xs px-2 py-1 rounded border" disabled={qoderworkActivityBusy}
+                          onClick={() => runQoderworkCnActivity(c.id, "pro-eligibility")}>Pro资格</button>
+                        <button type="button" className="text-xs px-2 py-1 rounded border" disabled={qoderworkActivityBusy}
+                          onClick={() => runQoderworkCnActivity(c.id, "invitation-code")}>邀请码</button>
+                        <button type="button" className="text-xs px-2 py-1 rounded border" disabled={qoderworkActivityBusy}
+                          onClick={() => runQoderworkCnActivity(c.id, "pro-claim")}>Pro领取</button>
+                        <button type="button" className="text-xs px-2 py-1 rounded border" disabled={qoderworkActivityBusy}
+                          onClick={() => runQoderworkCnActivity(c.id, "invitation-rewards")}>邀请奖励</button>
+                      </div>
+                    ))}
+                  </div>
+                  {qoderworkActivityMsg ? <div className="text-xs text-muted-foreground">{qoderworkActivityMsg}</div> : null}
+                </div>
+              )}
+
+              {(providerId === "codebuddy-cn" || providerId === "qoderwork-cn") && connections.some((c) => c.authType === "oauth") && (
                 <Button
                   size="sm"
                   variant="secondary"
