@@ -1,11 +1,11 @@
 /**
- * Qoder Protocol — deep module public interface.
+ * Qoder Protocol — deep module public interface (minimal reverse-proxy core).
  *
- * Production callers (executor, models, usage) use this surface only.
- * Cosy/encode/body/SSE helpers: sibling files or test-utils.js.
+ * Production callers: chat / catalog / getQuota / resolveProfile / createProtocol.
+ * Internals: encoding, cosy, body, sse (test-utils or sibling files).
  *
- * Profile selects intl (production). CN_WORK_PROFILE is data/stub only
- * until a later wire-in task; do not register a CN provider here.
+ * One production profile today: intl. Additional regions (e.g. CN) are added
+ * later as Profile data + thin adapter — not forked protocol code.
  */
 
 import { chat } from "./chat.js";
@@ -18,7 +18,6 @@ import {
 import { getQuota } from "./quota.js";
 import {
   INTL_PROFILE,
-  CN_WORK_PROFILE,
   DEFAULT_PROFILE,
   PROFILES,
   resolveProfile,
@@ -26,7 +25,6 @@ import {
 
 export {
   INTL_PROFILE,
-  CN_WORK_PROFILE,
   DEFAULT_PROFILE,
   PROFILES,
   resolveProfile,

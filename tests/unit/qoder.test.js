@@ -21,7 +21,6 @@ import {
 } from "../../open-sse/protocol/qoder/constants.js";
 import {
   INTL_PROFILE,
-  CN_WORK_PROFILE,
   resolveProfile,
   createProtocol,
 } from "../../open-sse/protocol/qoder/index.js";
@@ -516,12 +515,17 @@ describe("protocol profile", () => {
     expect(p.sessionType).toBe("test-session");
   });
 
-  it("createProtocol binds cn-work stub data without wiring a provider", () => {
-    const proto = createProtocol("cn-work");
-    expect(proto.profile.id).toBe("cn-work");
-    expect(proto.profile.openApiBase).toBe(CN_WORK_PROFILE.openApiBase);
-    expect(proto.profile.chatUrl).toBe(CN_WORK_PROFILE.chatUrl);
-    expect(proto.profile.sessionType).toBe("qoderworkcn");
+  it("createProtocol binds intl by default", () => {
+    const proto = createProtocol();
+    expect(proto.profile.id).toBe("intl");
+    expect(proto.profile.chatUrl).toBe(INTL_PROFILE.chatUrl);
+  });
+
+  it("createProtocol accepts inline profile object (future region = data only)", () => {
+    const alt = { ...INTL_PROFILE, id: "alt", chatUrl: "https://example.test/chat?Encode=1" };
+    const proto = createProtocol(alt);
+    expect(proto.profile.id).toBe("alt");
+    expect(proto.profile.chatUrl).toContain("example.test");
   });
 });
 
@@ -561,11 +565,17 @@ describe("profile-driven payload + cosy (simulation)", () => {
     expect(headers["Cosy-Data-Policy"]).toBe("agree");
   });
 
-  it("OAuth service uses profile login + device URLs", () => {
-    const svc = new QoderService({ profile: CN_WORK_PROFILE });
+  it("OAuth service uses injected profile login + device URLs", () => {
+    const alt = {
+      ...INTL_PROFILE,
+      id: "alt",
+      loginUrl: "https://example.test/device/selectAccounts",
+      deviceTokenUrl: "https://example.test/api/v1/deviceToken/poll",
+    };
+    const svc = new QoderService({ profile: alt });
     const flow = svc.initiateDeviceFlow();
-    expect(flow.verificationUriComplete.startsWith(CN_WORK_PROFILE.loginUrl)).toBe(true);
-    expect(svc.profile.deviceTokenUrl).toBe(CN_WORK_PROFILE.deviceTokenUrl);
+    expect(flow.verificationUriComplete.startsWith(alt.loginUrl)).toBe(true);
+    expect(svc.profile.deviceTokenUrl).toBe(alt.deviceTokenUrl);
   });
 
   it("default OAuth service stays on intl hosts", () => {

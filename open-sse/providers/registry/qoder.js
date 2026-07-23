@@ -52,6 +52,6 @@ export default {
   features: {
     usage: true,
   },
-  // Protocol profile id for open-sse/protocol/qoder (intl | future cn-work).
+  // Protocol profile id for open-sse/protocol/qoder (production: intl).
   protocolProfile: "intl",
 };
