@@ -71,7 +71,7 @@ async function fetchQoderCatalogRaw(credentials, signal, proxyOptions = null, pr
   const headers = {
     Accept: "application/json",
     "Accept-Encoding": "identity",
-    ...buildCosyHeaders(Buffer.alloc(0), modelListUrl, creds),
+    ...buildCosyHeaders(Buffer.alloc(0), modelListUrl, creds, p),
   };
 
   const controller = new AbortController();

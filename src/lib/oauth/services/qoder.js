@@ -1,7 +1,6 @@
 import {
-  QODER_DEVICE_TOKEN_URL,
-  QODER_LOGIN_URL,
-  QODER_USERINFO_URL,
+  INTL_PROFILE,
+  resolveProfile,
 } from "../../../../open-sse/protocol/qoder/index.js";
 import crypto from "crypto";
 
@@ -9,9 +8,8 @@ import crypto from "crypto";
  * Qoder OAuth Service
  * Implements the device-token flow:
  *   1. Generate PKCE pair + nonce + machine_id locally.
- *   2. Open https://qoder.com/device/selectAccounts?challenge=...&nonce=...
- *      in the user's browser.
- *   3. Poll openapi.qoder.sh/api/v1/deviceToken/poll until the user authorizes
+ *   2. Open login URL (profile.loginUrl) in the user's browser.
+ *   3. Poll profile.deviceTokenUrl until the user authorizes
  *      and the upstream returns a `dt-...` access token.
  *
  * Tokens live ~30 days; refresh is a no-op (the upstream refresh endpoint
@@ -19,6 +17,7 @@ import crypto from "crypto";
  *
  * Mirrors the structure of KiroService — COSY / encode / chat live in
  * open-sse/protocol/qoder/ (protocol module). OAuth only acquires credentials.
+ * URLs come from the protocol Profile (default intl).
  */
 
 // Timeout for OAuth helper calls. The OAuth modal polls every 2s for up to
@@ -51,6 +50,13 @@ async function fetchWithTimeout(url, init = {}) {
 
 export class QoderService {
   /**
+   * @param {{ profile?: string | object | null }} [options]
+   */
+  constructor(options = {}) {
+    this.profile = resolveProfile(options.profile ?? null);
+  }
+
+  /**
    * Generate a PKCE verifier + S256 challenge pair.
    * Uses 32 random bytes (matches qodercli/Veria).
    */
@@ -77,7 +83,7 @@ export class QoderService {
     });
 
     return {
-      verificationUriComplete: `${QODER_LOGIN_URL}?${params.toString()}`,
+      verificationUriComplete: `${this.profile.loginUrl}?${params.toString()}`,
       codeVerifier: verifier,
       nonce,
       machineId,
@@ -96,7 +102,7 @@ export class QoderService {
     if (!nonce || !codeVerifier) {
       throw new Error("pollDeviceToken: missing nonce or code verifier");
     }
-    const url = `${QODER_DEVICE_TOKEN_URL}?nonce=${encodeURIComponent(nonce)}&verifier=${encodeURIComponent(codeVerifier)}&challenge_method=S256`;
+    const url = `${this.profile.deviceTokenUrl}?nonce=${encodeURIComponent(nonce)}&verifier=${encodeURIComponent(codeVerifier)}&challenge_method=S256`;
 
     const response = await fetchWithTimeout(url, {
       method: "GET",
@@ -153,7 +159,7 @@ export class QoderService {
    */
   async fetchUserInfo(accessToken) {
     try {
-      const response = await fetchWithTimeout(QODER_USERINFO_URL, {
+      const response = await fetchWithTimeout(this.profile.userInfoUrl, {
         method: "GET",
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -212,3 +218,6 @@ export class QoderService {
     return Date.now() + 30 * 24 * 60 * 60 * 1000;
   }
 }
+
+/** Default intl profile export for callers that need login host without constructing. */
+export { INTL_PROFILE };

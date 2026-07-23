@@ -15,15 +15,8 @@
 
 import crypto from "crypto";
 
-import {
-  QODER_CLIENT_TYPE,
-  QODER_DATA_POLICY,
-  QODER_IDE_VERSION,
-  QODER_LOGIN_VERSION,
-  QODER_MACHINE_OS,
-  QODER_MACHINE_TYPE,
-  QODER_RSA_PUBLIC_KEY,
-} from "./constants.js";
+import { QODER_RSA_PUBLIC_KEY } from "./constants.js";
+import { resolveProfile } from "./profile.js";
 
 // AES-128 wants a 16-byte key. Match qodercli/Veria: take the first 16 chars
 // of a fresh UUID's canonical string (hyphens included). The key is fresh
@@ -110,11 +103,13 @@ export function generateMachineId() {
  * @param {string} [creds.name]            Display name (optional).
  * @param {string} [creds.email]           Email (optional, can be empty).
  * @param {string} [creds.machineId]       Persisted machine UUID.
+ * @param {import("./profile.js").QoderProfile|string|null} [profile]
  * @returns {Record<string, string>} Header map ready to merge onto fetch().
  */
-export function buildCosyHeaders(body, requestUrl, creds) {
+export function buildCosyHeaders(body, requestUrl, creds, profile = null) {
   if (!creds?.userId) throw new Error("cosy: user id is empty");
   if (!creds?.authToken) throw new Error("cosy: auth token is empty");
+  const p = resolveProfile(profile);
 
   const bodyBuf = Buffer.isBuffer(body)
     ? body
@@ -137,7 +132,7 @@ export function buildCosyHeaders(body, requestUrl, creds) {
     version: "v1",
     requestId,
     info,
-    cosyVersion: QODER_IDE_VERSION,
+    cosyVersion: p.ideVersion,
     ideVersion: "",
   });
   const payloadB64 = Buffer.from(payloadJson, "utf8").toString("base64");
@@ -156,20 +151,20 @@ export function buildCosyHeaders(body, requestUrl, creds) {
     "Cosy-Key": cosyKey,
     "Cosy-User": creds.userId,
     "Cosy-Date": timestamp,
-    "Cosy-Version": QODER_IDE_VERSION,
+    "Cosy-Version": p.ideVersion,
     "Cosy-Machineid": machineId,
     "Cosy-Machinetoken": machineId,
-    "Cosy-Machinetype": QODER_MACHINE_TYPE,
-    "Cosy-Machineos": QODER_MACHINE_OS,
-    "Cosy-Clienttype": QODER_CLIENT_TYPE,
+    "Cosy-Machinetype": p.machineType,
+    "Cosy-Machineos": p.machineOs,
+    "Cosy-Clienttype": p.clientType,
     "Cosy-Clientip": "127.0.0.1",
     "Cosy-Bodyhash": bodyHash,
     "Cosy-Bodylength": bodyLength,
     "Cosy-Sigpath": sigPath,
-    "Cosy-Data-Policy": QODER_DATA_POLICY,
+    "Cosy-Data-Policy": p.dataPolicy,
     "Cosy-Organization-Id": "",
     "Cosy-Organization-Tags": "",
-    "Login-Version": QODER_LOGIN_VERSION,
+    "Login-Version": p.loginVersion,
     "X-Request-Id": crypto.randomUUID(),
   };
 }

@@ -1,48 +1,57 @@
 /**
- * Qoder Protocol — deep module interface.
+ * Qoder Protocol — deep module public interface.
  *
- * Callers (executor, models API, usage) use this surface only.
- * Profile adapters select intl (default) vs future cn-work hosts/fields.
+ * Production callers (executor, models, usage) use this surface only.
+ * Cosy/encode/body/SSE helpers: sibling files or test-utils.js.
+ *
+ * Profile selects intl (production). CN_WORK_PROFILE is data/stub only
+ * until a later wire-in task; do not register a CN provider here.
  */
 
-export {
-  INTL_PROFILE,
-  DEFAULT_PROFILE,
-  resolveProfile,
-} from "./profile.js";
-
-export {
-  QODER_OPENAPI_BASE,
-  QODER_CENTER_BASE,
-  QODER_CHAT_BASE,
-  QODER_LOGIN_URL,
-  QODER_DEVICE_TOKEN_URL,
-  QODER_USERINFO_URL,
-  QODER_QUOTA_USAGE_URL,
-  QODER_REFRESH_TOKEN_URL,
-  QODER_CHAT_SIG_PATH,
-  QODER_CHAT_URL,
-  QODER_CHAT_URL_ENCODED,
-  QODER_MODEL_LIST_URL,
-  QODER_IDE_VERSION,
-  QODER_CLIENT_TYPE,
-  QODER_DATA_POLICY,
-  QODER_LOGIN_VERSION,
-  QODER_MACHINE_OS,
-  QODER_MACHINE_TYPE,
-  QODER_MODEL_MAP,
-  QODER_RSA_PUBLIC_KEY,
-} from "./constants.js";
-
-export { qoderEncodeBody } from "./encoding.js";
-export { buildCosyHeaders, generateMachineId } from "./cosy.js";
-export { chat } from "./chat.js";
-export {
+import { chat } from "./chat.js";
+import {
   getQoderModelConfig,
   resolveQoderModels,
   invalidateQoderCatalog,
   clearQoderCatalog,
 } from "./catalog.js";
-export { getQuota } from "./quota.js";
-export { wrapQoderSSE } from "./sse.js";
-export { normalizeMessages, buildQoderRequestBody, buildChatPayload } from "./body.js";
+import { getQuota } from "./quota.js";
+import {
+  INTL_PROFILE,
+  CN_WORK_PROFILE,
+  DEFAULT_PROFILE,
+  PROFILES,
+  resolveProfile,
+} from "./profile.js";
+
+export {
+  INTL_PROFILE,
+  CN_WORK_PROFILE,
+  DEFAULT_PROFILE,
+  PROFILES,
+  resolveProfile,
+  chat,
+  getQoderModelConfig,
+  resolveQoderModels,
+  invalidateQoderCatalog,
+  clearQoderCatalog,
+  getQuota,
+};
+
+/**
+ * Bind a profile once for chat/catalog/quota.
+ * @param {string | import("./profile.js").QoderProfile | null | undefined} profileOrId
+ */
+export function createProtocol(profileOrId = null) {
+  const profile = resolveProfile(profileOrId);
+  return {
+    profile,
+    chat: (opts) => chat({ ...opts, profile }),
+    getQuota: (accessToken, options = {}) =>
+      getQuota(accessToken, { ...options, profile }),
+    resolveModels: (credentials, options = {}) =>
+      resolveQoderModels(credentials, { ...options, profile }),
+    getModelConfig: (credentials, modelKey, options = {}) =>
+      getQoderModelConfig(credentials, modelKey, { ...options, profile }),
+  };
+}

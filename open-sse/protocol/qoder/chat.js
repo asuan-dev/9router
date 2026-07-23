@@ -75,7 +75,7 @@ export async function chat({
       name: credentials.displayName || "",
       email: credentials.email || "",
       machineId: psd.machineId || "",
-    });
+    }, p);
   } catch (err) {
     const fakeResp = new Response(
       JSON.stringify({ error: { message: `qoder cosy signing failed: ${err.message}` } }),

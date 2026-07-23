@@ -3,25 +3,30 @@
  *
  * Protocol owns Cosy sign, encode, body shape, SSE unwrap, catalog, quota.
  * Token refresh: not supported for device tokens (upstream 403); re-login required.
+ * Profile: from provider config protocolProfile (default intl).
  */
 
 import { BaseExecutor } from "./base.js";
 import { PROVIDERS } from "../config/providers.js";
-import {
-  chat as qoderChat,
-  wrapQoderSSE,
-  normalizeMessages,
-  buildQoderRequestBody,
-  QODER_CHAT_URL_ENCODED,
-} from "../protocol/qoder/index.js";
+import { chat as qoderChat } from "../protocol/qoder/index.js";
 
 export class QoderExecutor extends BaseExecutor {
-  constructor() {
-    super("qoder", PROVIDERS.qoder);
+  constructor(providerId = "qoder", config = null) {
+    super(providerId, config || PROVIDERS.qoder || PROVIDERS[providerId]);
+  }
+
+  /** @returns {string} */
+  getProtocolProfile() {
+    return (
+      this.config?.protocolProfile ||
+      this.config?.protocol?.profile ||
+      "intl"
+    );
   }
 
   buildUrl() {
-    return QODER_CHAT_URL_ENCODED;
+    // Real URL comes from profile inside protocol.chat; keep registry base for BaseExecutor fallbacks.
+    return this.config?.baseUrl || "";
   }
 
   async execute({ model, body, stream, credentials, signal, log, proxyOptions = null }) {
@@ -34,6 +39,7 @@ export class QoderExecutor extends BaseExecutor {
       log,
       proxyOptions,
       timeoutMs,
+      profile: this.getProtocolProfile(),
     });
   }
 
@@ -48,10 +54,3 @@ export class QoderExecutor extends BaseExecutor {
 }
 
 export default QoderExecutor;
-
-/** @deprecated Prefer protocol/qoder exports; kept for unit tests during transition. */
-export const __test__ = {
-  normalizeMessages,
-  wrapQoderSSE,
-  buildQoderRequestBody,
-};

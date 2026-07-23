@@ -20,6 +20,7 @@ export default {
     headers: {},
     timeoutMs: 120000,
     stallTimeoutMs: 120000,
+    protocolProfile: "intl",
     usage: {
       url: "https://openapi.qoder.sh/api/v2/quota/usage",
     },
@@ -51,4 +52,6 @@ export default {
   features: {
     usage: true,
   },
+  // Protocol profile id for open-sse/protocol/qoder (intl | future cn-work).
+  protocolProfile: "intl",
 };

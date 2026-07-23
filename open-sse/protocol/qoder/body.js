@@ -97,11 +97,11 @@ async function buildQoderRequestBody({ model, body, credentials, log, proxyOptio
   
   // Fetch model config from dynamic API instead of relying on static QODER_MODEL_MAP.
   // This allows support for new Qoder models (e.g., qmodel_latest) without code changes.
-  let modelConfig = await getQoderModelConfig(credentials, qoderKey, { log, proxyOptions, signal });
+  let modelConfig = await getQoderModelConfig(credentials, qoderKey, { log, proxyOptions, signal, profile: p });
   if (!modelConfig) {
     // Try a forced refresh once before giving up — the cache may simply
     // not be populated yet on first ever call for this credential.
-    const refreshed = await resolveQoderModels(credentials, { forceRefresh: true, log, proxyOptions, signal });
+    const refreshed = await resolveQoderModels(credentials, { forceRefresh: true, log, proxyOptions, signal, profile: p });
     const retried = refreshed?.rawConfigs.get(qoderKey);
     if (!retried) {
       throw new Error(

@@ -16,8 +16,9 @@ Provider-agnostic SSE engine: one OpenAI-style request → any provider (LLM cha
 - `rtk/` — request token-killer. `index.js` compresses `tool_result` content in-place (OpenAI/Claude/Kiro shapes); `filters/` per-tool compressors + `autodetect.js`; `headroom.js` external compress proxy; `caveman.js` system-prompt injector.
 - `transformer/` — `responsesTransformer.js` (Chat Completions SSE → Codex Responses API SSE), `streamToJsonConverter.js`.
 - `shared/` — cross-provider auth/identity: `clineAuth.js`, `machineId.js`.
-- `protocol/qoder/` — Qoder protocol deep module (Cosy, encode, chat body/SSE, catalog, quota, profiles). Prefer this over any legacy shared path.
-- `services/` — `model.js`, `provider.js`, `accountFallback.js`, `combo.js`, `compact.js`, `tokenRefresh/`+`tokenRefresh.js`, `oauthCredentialManager.js`, `usage/`, `projectId.js`, `kiroModels.js`/`qoderModels.js`.
+- `protocol/qoder/` — Qoder protocol **deep module** (Cosy, encode, chat body/SSE, catalog, quota, profiles). Public surface: `chat` / catalog / `getQuota` / `resolveProfile` / `createProtocol`. Internals for tests: `test-utils.js`. Region/product is Profile data (intl production; cn-work stub until wired).
+- `services/` — `model.js`, `provider.js`, `accountFallback.js`, `combo.js`, `compact.js`, `tokenRefresh/`+`tokenRefresh.js`, `oauthCredentialManager.js`, `usage/`, `projectId.js`, `kiroModels.js`/`qoderModels.js`, `activities/` (e.g. codebuddy-cn check-in — **not** inside protocol chat).
+- OAuth for Qoder lives in `src/lib/oauth/services/qoder.js` (credentials only; URLs from protocol Profile).
 - `utils/` — streamHandler, stream, sse, error, sessionManager, claudeCloaking, clientDetector, proxyFetch (patches global fetch), cursorProtobuf/cursorChecksum, ollamaTransform.
 
 ## Conventions
