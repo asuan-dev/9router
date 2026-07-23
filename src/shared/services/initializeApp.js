@@ -113,11 +113,15 @@ async function runHeavyStartup() {
       .catch((e) => console.log("[AutoPing] scheduler start failed:", e.message));
   }
 
-  if (hasCodebuddyAutoCheckinEnabled(settings)) {
-    import("@/shared/services/codebuddyAutoCheckin")
-      .then(({ startCodebuddyAutoCheckin }) => startCodebuddyAutoCheckin())
-      .catch((e) => console.log("[CODEBUDDY_CHECKIN] scheduler start failed:", e.message));
-  }
+  // Generic auto check-in scheduler (replaces codebuddyAutoCheckin)
+  import("@/shared/services/activityScheduler")
+    .then(async ({ startAutoCheckin, hasAnyAutoCheckinEnabled }) => {
+      const legacyOn = hasCodebuddyAutoCheckinEnabled(settings);
+      if (legacyOn || await hasAnyAutoCheckinEnabled()) {
+        startAutoCheckin();
+      }
+    })
+    .catch((e) => console.log("[AUTO_CHECKIN] scheduler start failed:", e.message));
 }
 
 function hasQuotaAutoPingEnabled(settings) {

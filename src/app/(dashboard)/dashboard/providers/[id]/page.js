@@ -531,14 +531,15 @@ export default function ProviderDetailPage() {
 
 
 
-  // Event-driven badge update: only when scheduler gets an upstream check-in response.
+  // Event-driven badge update: scheduler emits after each check-in attempt.
   useEffect(() => {
-    if (providerId !== "codebuddy-cn") return undefined;
     const es = new EventSource("/api/providers/codebuddy-checkin/stream");
     es.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
-        if (!data?.connectionId || !data?.providerSpecificData) return;
+        if (!data?.connectionId) return;
+        const patch = data.providerSpecificData || data.result;
+        if (!patch) return;
         setConnections((prev) =>
           prev.map((c) => {
             if (c.id !== data.connectionId) return c;
@@ -546,7 +547,7 @@ export default function ProviderDetailPage() {
               ...c,
               providerSpecificData: {
                 ...(c.providerSpecificData || {}),
-                ...data.providerSpecificData,
+                ...patch,
               },
             };
           }),

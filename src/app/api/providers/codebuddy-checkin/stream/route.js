@@ -1,4 +1,4 @@
-import { checkinEmitter } from "@/shared/services/codebuddyAutoCheckin";
+import { checkinEmitter } from "@/shared/services/activityScheduler";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +23,7 @@ export async function GET() {
         }
       };
 
-      checkinEmitter.on("update", state.onUpdate);
+      checkinEmitter.on("checkin", state.onUpdate);
 
       // Keepalive only — not a data probe
       state.keepalive = setInterval(() => {
@@ -36,13 +36,13 @@ export async function GET() {
         } catch {
           state.closed = true;
           clearInterval(state.keepalive);
-          if (state.onUpdate) checkinEmitter.off("update", state.onUpdate);
+          if (state.onUpdate) checkinEmitter.off("checkin", state.onUpdate);
         }
       }, 25000);
     },
     cancel() {
       state.closed = true;
-      if (state.onUpdate) checkinEmitter.off("update", state.onUpdate);
+      if (state.onUpdate) checkinEmitter.off("checkin", state.onUpdate);
       clearInterval(state.keepalive);
     },
   });

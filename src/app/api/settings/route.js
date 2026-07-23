@@ -109,11 +109,9 @@ export async function PATCH(request) {
     }
 
     if (Object.prototype.hasOwnProperty.call(body, "codebuddyAutoCheckin")) {
-      import("@/shared/services/codebuddyAutoCheckin")
-        .then(({ configureCodebuddyAutoCheckin }) => {
-          configureCodebuddyAutoCheckin(settings);
-        })
-        .catch((error) => console.warn("[CODEBUDDY_CHECKIN] settings update failed:", error.message));
+      import("@/shared/services/activityScheduler")
+        .then(({ configureAutoCheckin }) => configureAutoCheckin())
+        .catch((error) => console.warn("[AUTO_CHECKIN] settings update failed:", error.message));
     }
 
     const { password, oidcClientSecret, ...safeSettings } = settings;
