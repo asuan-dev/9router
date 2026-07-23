@@ -480,9 +480,24 @@ export default function ProviderDetailPage() {
     }
   };
 
-  const handleAutoCheckinGlobal = (on) => {
-    if (providerId !== "codebuddy-cn") return;
-    saveAutoCheckinEnabled(!!on);
+  const handleAutoCheckinGlobal = async (on) => {
+    const oauthConns = connections.filter((c) => c.authType === "oauth");
+    for (const conn of oauthConns) {
+      try {
+        await fetch("/api/activities/checkin", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ connectionId: conn.id, action: on ? "enable" : "disable" }),
+        });
+      } catch { /* ignore individual failures */ }
+    }
+    setConnections((prev) =>
+      prev.map((c) =>
+        c.authType === "oauth"
+          ? { ...c, providerSpecificData: { ...(c.providerSpecificData || {}), autoCheckinEnabled: !!on } }
+          : c,
+      ),
+    );
   };
 
   const handleRefreshProfile = async (connectionId) => {
@@ -1595,6 +1610,16 @@ export default function ProviderDetailPage() {
                 >
                   {refreshingAllProfiles ? "刷新中..." : "全部刷新"}
                 </Button>
+              )}
+              {(providerId === "codebuddy-cn" || providerId === "qoderwork-cn") && connections.some((c) => c.authType === "oauth") && (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-text-muted font-medium">自动签到</span>
+                  <Toggle
+                    checked={connections.some((c) => c.authType === "oauth" && c.providerSpecificData?.autoCheckinEnabled === true)}
+                    onChange={handleAutoCheckinGlobal}
+                    title="开启后：全部 OAuth 账号每日自动签到；每个账号也可单独关闭"
+                  />
+                </div>
               )}
               {/* Round Robin toggle */}
               <div className="flex flex-wrap items-center gap-2">
