@@ -1,15 +1,15 @@
 /**
  * Qoder model catalog fetcher.
  *
- * Calls /algo/api/v2/model/list (COSY-signed) on the inference host to get
+ * Calls profile.modelListUrl (COSY-signed, Encode=1 on intl default) to get
  * the live catalog for an authenticated Qoder account, then caches the
  * per-model `model_config` blocks by key. Chat requests later look up the
  * exact server-published metadata for the model they want — Qoder's chat
  * endpoint silently downgrades to a different model when the wrong
  * model_config is sent.
  *
- * On any error the live cache stays empty and chatExecuteCall surfaces the
- * problem to the user as "model config not yet fetched, retry shortly".
+ * On any error the live cache stays empty; body builder throws if model_config missing
+ * (unless modelConfig is injected for tests).
  */
 
 import { createHash } from "crypto";

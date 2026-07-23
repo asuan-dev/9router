@@ -1,11 +1,13 @@
 /**
- * Qoder Protocol — deep module public interface (minimal reverse-proxy core).
+ * Qoder Protocol — public surface for the minimal reverse-proxy.
  *
- * Production callers: chat / catalog / getQuota / resolveProfile / createProtocol.
- * Internals: encoding, cosy, body, sse (test-utils or sibling files).
+ *   chat / createProtocol  — inference
+ *   catalog helpers        — model_config list
+ *   getQuota               — usage
+ *   resolveProfile         — intl (+ future region data)
  *
- * One production profile today: intl. Additional regions (e.g. CN) are added
- * later as Profile data + thin adapter — not forked protocol code.
+ * Internals (encode, cosy, body, sse): import from sibling files or test-utils.
+ * Contract: lab/qodercli/README.md
  */
 
 import { chat } from "./chat.js";
@@ -37,7 +39,7 @@ export {
 };
 
 /**
- * Bind a profile once for chat/catalog/quota.
+ * Bind profile for chat / catalog / quota.
  * @param {string | import("./profile.js").QoderProfile | null | undefined} profileOrId
  */
 export function createProtocol(profileOrId = null) {
@@ -45,8 +47,7 @@ export function createProtocol(profileOrId = null) {
   return {
     profile,
     chat: (opts) => chat({ ...opts, profile }),
-    getQuota: (accessToken, options = {}) =>
-      getQuota(accessToken, { ...options, profile }),
+    getQuota: (accessToken, options = {}) => getQuota(accessToken, { ...options, profile }),
     resolveModels: (credentials, options = {}) =>
       resolveQoderModels(credentials, { ...options, profile }),
     getModelConfig: (credentials, modelKey, options = {}) =>

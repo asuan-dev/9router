@@ -138,7 +138,7 @@ export function buildCosyHeaders(body, requestUrl, creds, profile = null) {
   const payloadB64 = Buffer.from(payloadJson, "utf8").toString("base64");
 
   const sigPath = computeSigPath(requestUrl);
-  // Official Qoder IDE 1.17.3 / QoderWork CN: space-separated MD5 input (not newlines).
+  // MD5 field join: space (current). CLIProxy/qoder2api use \\n — SEP not dual-moded; nail with live capture if 403.
   const sigInput = `${payloadB64} ${cosyKey} ${timestamp} ${bodyBuf.toString("latin1")} ${sigPath}`;
   const sig = md5Hex(Buffer.from(sigInput, "latin1"));
 

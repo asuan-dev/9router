@@ -12,14 +12,18 @@
 import { describe, it, expect } from "vitest";
 import crypto from "crypto";
 
-import { qoderEncodeBody, buildCosyHeaders, normalizeMessages, wrapQoderSSE, buildQoderRequestBody } from "../../open-sse/protocol/qoder/test-utils.js";
-import { SHELL, resolveReasoningEffort } from "../../open-sse/protocol/qoder/body.js";
-import { QoderService } from "../../src/lib/oauth/services/qoder.js";
 import {
+  qoderEncodeBody,
+  buildCosyHeaders,
+  normalizeMessages,
+  wrapQoderSSE,
+  buildQoderRequestBody,
+  SHELL,
+  resolveReasoningEffort,
   QODER_CHAT_URL_ENCODED,
   QODER_MODEL_LIST_URL,
-  QODER_MODEL_MAP,
-} from "../../open-sse/protocol/qoder/constants.js";
+} from "../../open-sse/protocol/qoder/test-utils.js";
+import { QoderService } from "../../src/lib/oauth/services/qoder.js";
 import {
   INTL_PROFILE,
   resolveProfile,
@@ -34,11 +38,7 @@ const generatePkcePair = () => new QoderService().generatePkcePair();
 const initiateDeviceFlow = () => new QoderService().initiateDeviceFlow();
 const parseExpiry = QoderService.parseExpiry;
 
-describe("QODER_MODEL_MAP", () => {
-  it("allows Qoder's latest model key", () => {
-    expect(QODER_MODEL_MAP.qmodel_latest).toBe("qmodel_latest");
-  });
-
+describe("provider catalog", () => {
   it("exposes Qoder's latest model in the static provider catalog", () => {
     expect(PROVIDER_MODELS.qd.some((model) => model.id === "qmodel_latest")).toBe(true);
   });
@@ -491,7 +491,7 @@ describe("wrapQoderSSE", () => {
     const env = JSON.stringify({ statusCodeValue: 503, body: "service unavailable" });
     const wrapped = wrapQoderSSE(makeResponse([`data: ${env}\n\n`]), "qoder/lite");
     const out = await drain(wrapped);
-    expect(out).toContain("[qoder error 503");
+    expect(out).toContain("qoder_upstream_error");
     expect(out).toContain("data: [DONE]\n\n");
   });
 
@@ -678,5 +678,41 @@ describe("contract body (awA)", () => {
     expect(resolveReasoningEffort({ reasoning_effort: "x-high" })).toBe("xhigh");
     expect(resolveReasoningEffort({ reasoning: { effort: "low" } })).toBe("low");
     expect(resolveReasoningEffort({ reasoning_effort: "auto" })).toBeUndefined();
+  });
+});
+
+describe("wrapQoderSSE special tokens", () => {
+  function makeResponse(lines, { status = 200 } = {}) {
+    const body = new ReadableStream({
+      start(controller) {
+        const encoder = new TextEncoder();
+        for (const line of lines) controller.enqueue(encoder.encode(line));
+        controller.close();
+      },
+    });
+    return new Response(body, { status });
+  }
+  async function drain(response) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+    }
+    return buf + decoder.decode();
+  }
+
+  it("does not forward NOT_EXCEED_QUOTA as content", async () => {
+    const out = await drain(wrapQoderSSE(makeResponse(["data: [NOT_EXCEED_QUOTA]\n\n"]), "qoder/x"));
+    expect(out).not.toContain("NOT_EXCEED_QUOTA");
+    expect(out).toContain("data: [DONE]");
+  });
+
+  it("maps EXCEED_QUOTA to error event not content delta", async () => {
+    const out = await drain(wrapQoderSSE(makeResponse(["data: [EXCEED_QUOTA] limit\n\n"]), "qoder/x"));
+    expect(out).toContain("qoder_upstream_error");
+    expect(out).not.toMatch(/delta":\{"content":"\\n\[qoder error/);
   });
 });
