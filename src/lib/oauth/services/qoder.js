@@ -2,9 +2,8 @@ import {
   QODER_DEVICE_TOKEN_URL,
   QODER_LOGIN_URL,
   QODER_USERINFO_URL,
-} from "../../qoder/constants.js";
+} from "../../../../open-sse/protocol/qoder/index.js";
 import crypto from "crypto";
-import { v4 as uuidv4 } from "uuid";
 
 /**
  * Qoder OAuth Service
@@ -18,9 +17,8 @@ import { v4 as uuidv4 } from "uuid";
  * Tokens live ~30 days; refresh is a no-op (the upstream refresh endpoint
  * returns 403 for our flow). Users re-run login when expired.
  *
- * Mirrors the structure of KiroService — the COSY signing / WAF-bypass body
- * encoding / chat protocol live separately in src/lib/qoder/ because they're
- * used by every signed request, not just OAuth.
+ * Mirrors the structure of KiroService — COSY / encode / chat live in
+ * open-sse/protocol/qoder/ (protocol module). OAuth only acquires credentials.
  */
 
 // Timeout for OAuth helper calls. The OAuth modal polls every 2s for up to
@@ -68,8 +66,8 @@ export class QoderService {
    */
   initiateDeviceFlow() {
     const { verifier, challenge } = this.generatePkcePair();
-    const nonce = uuidv4();
-    const machineId = uuidv4();
+    const nonce = crypto.randomUUID();
+    const machineId = crypto.randomUUID();
 
     const params = new URLSearchParams({
       challenge,
