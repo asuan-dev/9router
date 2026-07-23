@@ -31,7 +31,7 @@ export const QODER_IDE_VERSION = "1.0.0";
 export const QODER_CLIENT_TYPE = "6";
 export const QODER_DATA_POLICY = "disagree";
 export const QODER_LOGIN_VERSION = "v2";
-export const QODER_MACHINE_OS = "darwin";
+export const QODER_MACHINE_OS = `${process.arch === "arm64" ? "aarch64" : process.arch === "x64" ? "x86_64" : process.arch}_darwin`;
 export const QODER_MACHINE_TYPE = "5";
 
 // RSA public key for COSY (same across IDE / CN / CLIProxy family).

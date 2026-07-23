@@ -159,7 +159,6 @@ export function buildCosyHeaders(body, requestUrl, creds, profile = null) {
     "Cosy-Version": p.ideVersion,
     "Cosy-Machineid": machineId,
     "Cosy-Machinetoken": machineId,
-    "Cosy-MachineCode": machineId,
     "Cosy-Machinetype": p.machineType,
     "Cosy-Machineos": p.machineOs,
     "Cosy-Clienttype": p.clientType,

@@ -21,7 +21,7 @@ import { getQoderModelConfig, resolveQoderModels } from "./catalog.js";
 import { resolveProfile } from "./profile.js";
 import { resolveSessionId } from "../../utils/sessionManager.js";
 
-/** Official free-chat shell (awA). image_urls filled when vision parts present. */
+/** Official free-chat shell (awA). */
 const SHELL = {
   chat_task: "FREE_INPUT",
   stream: true,
@@ -31,7 +31,6 @@ const SHELL = {
   version: "3",
   agent_id: "agent_common",
   task_id: "common",
-  image_urls: null,
   aliyun_user_type: "",
 };
 
@@ -429,7 +428,6 @@ async function buildQoderRequestBody({
     chat_record_id: requestId,
     session_id: sessionId,
     ...SHELL,
-    image_urls: shellImageUrls,
     session_type: p.sessionType,
     model_config: trimmedModelConfig,
     system: systemText,
@@ -445,7 +443,7 @@ async function buildQoderRequestBody({
       product: p.businessProduct,
       version: p.businessVersion,
       type: p.businessType || "agent",
-      stage: "start",
+      stage: "init",
       id: randomUUID(),
       name: truncate(lastUser, 30),
       begin_at: Date.now(),

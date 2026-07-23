@@ -34,7 +34,6 @@ import { getCapabilitiesForModel } from "../../open-sse/providers/capabilities.j
 import { getThinkingLevels } from "../../open-sse/providers/thinkingLevels.js";
 import { applyThinking } from "../../open-sse/translator/concerns/thinkingUnified.js";
 import { refreshQoderDeviceToken } from "../../open-sse/services/tokenRefresh/providers.js";
-import { QoderService } from "../../src/lib/oauth/services/qoder.js";
 import { QoderExecutor } from "../../open-sse/executors/qoder.js";
 import { PROVIDER_MODELS } from "../../open-sse/config/providerModels.js";
 
@@ -813,7 +812,7 @@ describe("contract body (awA)", () => {
     expect(payload.parameters).toEqual({ max_tokens: 128, reasoning_effort: "high", context_length: 100000 });
   });
 
-  it("fills image_urls and chat_context.imageUrls from vision parts", async () => {
+  it("fills chat_context.imageUrls from vision parts", async () => {
     const { payload } = await buildQoderRequestBody({
       model: "qmodel_latest",
       body: {
@@ -830,7 +829,6 @@ describe("contract body (awA)", () => {
       credentials,
       modelConfig: fakeModelConfig,
     });
-    expect(payload.image_urls).toEqual(["data:image/png;base64,xx"]);
     expect(payload.chat_context.imageUrls).toEqual(["data:image/png;base64,xx"]);
     expect(payload.chat_context.text).toBe("describe");
     expect(payload.messages[0].content).toEqual([
@@ -960,7 +958,7 @@ describe("field-ops pipeline (capabilities → applyThinking → body)", () => {
     expect(payload.parameters.context_length).toBe(400000);
   });
 
-  it("attaches CN business block with qoder_work product/agent type/start stage", async () => {
+  it("attaches CN business block with qoder_work product/agent type/init stage", async () => {
     const { payload } = await buildQoderRequestBody({
       model: "qmodel_latest",
       body: { messages: [{ role: "user", content: "hi there" }] },
@@ -972,7 +970,7 @@ describe("field-ops pipeline (capabilities → applyThinking → body)", () => {
     expect(payload.business).toMatchObject({
       product: "qoder_work",
       type: "agent",
-      stage: "start",
+      stage: "init",
     });
   });
 });
