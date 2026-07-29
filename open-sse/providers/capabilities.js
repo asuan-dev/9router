@@ -186,38 +186,48 @@ export const PROVIDER_CAPABILITIES = {
     "gpt-5.6-terra-thinking-agentic": KIRO_GPT_5_6_CAPABILITIES,
     "gpt-5.6-luna-thinking-agentic": KIRO_GPT_5_6_CAPABILITIES,
   },
-  // CodeBuddy.cn — authoritative per-model metadata from the gateway's model
-  // config (contextWindow=maxInputTokens, maxOutput=maxOutputTokens, vision=
+  // CodeBuddy.cn — per-model metadata mirrors the gateway's own model config
+  // (contextWindow=maxInputTokens, maxOutput=maxOutputTokens, vision=
   // supportsImages). Every model reasons via OpenAI-style reasoning_effort
   // (see registry thinkingFormat). `onlyReasoning` models can't turn thinking
   // off → thinkingCanDisable:false (clamped to minimal instead of disabled).
   //
-  // vision: the gateway is multimodal for its whole chat lineup — every chat
-  // model in the official CLI's product.json modelOptions carries
-  // supportsImages:true (only the "default" router pseudo-model and the
-  // completion/codewise models are text-only, and we expose neither).
-  // `disabledMultimodal` is NOT an image gate: it is metadata the client only
-  // copies around, and the sole image check upstream is
-  // `hasImages && !modelInfo.supportsImages → IMAGE_NOT_SUPPORTED`.
-  // Evidence: lab/workbuddy/unpacked/5.3.3/cli/product*.json +
-  // renderer/assets/connector-*.js (MainContentCore send path).
+  // AUTHORITATIVE SOURCE — the live cloud config, not the bundled fallback:
+  //   GET {endpoint}/v3/config  (Bearer)  ->  data.data.models[]
+  // The unpacked CLI's product*.json `.models` is only the built-in fallback
+  // the client ships with; the cloud response overrides it at runtime, and the
+  // two disagree (e.g. glm-4.7/glm-5.0 advertise supportsImages:false live but
+  // true in the bundle). Always re-check against /v3/config before editing.
+  //
+  // `disabledMultimodal` is NOT an image gate: the client only copies it
+  // around. The sole upstream image check is
+  // `hasImages && !model.supportsImages → IMAGE_NOT_SUPPORTED`
+  // (renderer/assets/connector-*.js, MainContentCore send path).
+  //
+  // This hand-written table is a FALLBACK. Live discovery (services/catalog)
+  // supersedes it per connection; entries here only cover cold start and
+  // models the account cannot currently see.
   "codebuddy-cn": {
-    "glm-5.2":            { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1000000, maxOutput: 48000 },
-    "glm-5.1":            { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 200000, maxOutput: 48000 },
-    "glm-5.0":            { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 200000, maxOutput: 48000 },
-    "glm-5.0-turbo":      { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 200000, maxOutput: 48000 },
-    "glm-5v-turbo":       { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 200000, maxOutput: 38000 },
-    "glm-4.7":            { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 200000, maxOutput: 48000 },
-    "minimax-m3":         { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 512000, maxOutput: 48000 },
-    "minimax-m2.7":       { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 200000, maxOutput: 48000 },
-    "kimi-k2.7":          { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 256000, maxOutput: 32000 },
-    "kimi-k2.6":          { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 256000, maxOutput: 32000 },
-    "kimi-k2.5":          { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 164000, maxOutput: 32000 },
-    "hy3-preview":        { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 192000, maxOutput: 64000 },
-    "hy3":                { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 192000, maxOutput: 64000 },
-    "deepseek-v4-pro":    { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1000000, maxOutput: 50000 },
-    "deepseek-v4-flash":  { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1000000, maxOutput: 50000 },
-    "deepseek-v3-2-volc": { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 96000, maxOutput: 32000 },
+    "glm-5.2":            { vision: true,  reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1000000, maxOutput: 48000 },
+    "glm-5.1":            { vision: true,  reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 200000, maxOutput: 48000 },
+    "glm-5.0":            { vision: false, reasoning: true, thinkingFormat: "openai", contextWindow: 200000, maxOutput: 48000 },
+    "glm-5.0-turbo":      { vision: false, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 200000, maxOutput: 48000 },
+    "glm-5v-turbo":       { vision: true,  reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 200000, maxOutput: 64000 },
+    "glm-4.7":            { vision: false, reasoning: true, thinkingFormat: "openai", contextWindow: 200000, maxOutput: 48000 },
+    "glm-4.6v":           { vision: true,  reasoning: true, thinkingFormat: "openai", contextWindow: 128000, maxOutput: 32000 },
+    "minimax-m3":         { vision: true,  reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 512000, maxOutput: 128000 },
+    "minimax-m2.7":       { vision: true,  reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 200000, maxOutput: 48000 },
+    "minimax-m2.5":       { vision: false, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 200000, maxOutput: 48000 },
+    "kimi-k3-1":          { vision: true,  reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1000000, maxOutput: 32000 },
+    "kimi-k2.7":          { vision: true,  reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 256000, maxOutput: 32000 },
+    "kimi-k2.6":          { vision: true,  reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 256000, maxOutput: 32000 },
+    "kimi-k2.5":          { vision: true,  reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 164000, maxOutput: 32000 },
+    "kimi-k2-thinking":   { vision: false, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 164000, maxOutput: 32000 },
+    "hy3":                { vision: true,  reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 192000, maxOutput: 64000 },
+    "hunyuan-chat":       { vision: false, contextWindow: 200000, maxOutput: 8192 },
+    "deepseek-v4-pro":    { vision: true,  reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1000000, maxOutput: 50000 },
+    "deepseek-v4-flash":  { vision: true,  reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1000000, maxOutput: 50000 },
+    "deepseek-v3-2-volc": { vision: false, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 96000, maxOutput: 32000 },
   },
   // Qoder family — one caps table; intl + CN share wire (reasoning_effort).
   qoder: QODER_PROVIDER_MODEL_CAPS,
