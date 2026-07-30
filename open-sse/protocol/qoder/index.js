@@ -18,6 +18,7 @@ import {
   clearQoderCatalog,
 } from "./catalog.js";
 import { getQuota } from "./quota.js";
+import { isQoderPat, resolvePatCredential } from "./pat.js";
 import {
   INTL_PROFILE,
   CN_WORK_PROFILE,
@@ -38,6 +39,8 @@ export {
   invalidateQoderCatalog,
   clearQoderCatalog,
   getQuota,
+  isQoderPat,
+  resolvePatCredential,
 };
 
 /**

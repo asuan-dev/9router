@@ -564,6 +564,11 @@ export async function refreshQoderDeviceToken(refreshToken, profileId = "intl", 
           message: e?.message || "Qoder refresh rejected",
         };
       }
+      return null;
+    }
+  }, log);
+}
+
 export async function refreshCodebuddyIntlToken(refreshToken, log) {
   if (!refreshToken) return null;
   return dedupRefresh("codebuddy-intl", refreshToken, async () => {

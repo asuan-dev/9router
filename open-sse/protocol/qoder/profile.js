@@ -16,6 +16,7 @@ import {
   QODER_LOGIN_URL,
   QODER_DEVICE_TOKEN_URL,
   QODER_USERINFO_URL,
+  QODER_JOB_TOKEN_EXCHANGE_URL,
   QODER_IDE_VERSION,
   QODER_CLIENT_TYPE,
   QODER_DATA_POLICY,
@@ -38,6 +39,8 @@ import {
  *   requires (CN returns 401 without it; intl has no such constraint).
  *   Evidence: lab/qoderwork-cn/references/api-inventory-0.6.7.md#L25
  * @property {string} userInfoUrl
+ * @property {string} jobTokenExchangeUrl - PAT (`pt-...`) → short-lived job
+ *   token exchange; plain JSON POST, not cosy-signed.
  * @property {string} loginUrl
  * @property {string} [refreshTokenUrl]
  * @property {string} [deviceClientId] - OAuth device client_id (CN requires it)
@@ -69,6 +72,7 @@ export const INTL_PROFILE = {
   quotaUrl: QODER_QUOTA_USAGE_URL,
   deviceTokenUrl: QODER_DEVICE_TOKEN_URL,
   userInfoUrl: QODER_USERINFO_URL,
+  jobTokenExchangeUrl: QODER_JOB_TOKEN_EXCHANGE_URL,
   loginUrl: QODER_LOGIN_URL,
   refreshTokenUrl: INTL_DEVICE_REFRESH_URL,
   // CLI (qodercli) sends client_id on the login URL for intl too — without it
@@ -108,6 +112,7 @@ export const CN_WORK_PROFILE = {
   quotaUrl: `${CN_OPENAPI}/api/v2/quota/usage`,
   deviceTokenUrl: `${CN_OPENAPI}/api/v1/deviceToken/poll`,
   userInfoUrl: `${CN_OPENAPI}/api/v1/userinfo`,
+  jobTokenExchangeUrl: `${CN_OPENAPI}/api/v1/jobToken/exchange`,
   loginUrl: "https://qoder.com.cn/device/selectAccounts",
   refreshTokenUrl: `${CN_OPENAPI}/api/v1/deviceToken/refresh`,
   deviceClientId: "1c5e33e1-364d-4ce6-b02c-acaa81274a5c",

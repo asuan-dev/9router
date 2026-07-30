@@ -12,6 +12,7 @@ import { buildCosyHeaders } from "./cosy.js";
 import { buildChatPayload } from "./body.js";
 import { wrapQoderSSE } from "./sse.js";
 import { resolveProfile } from "./profile.js";
+import { isQoderPat, resolvePatCredential } from "./pat.js";
 
 /**
  * Execute one Qoder chat request.
@@ -36,6 +37,42 @@ export async function chat({
 }) {
   const p = resolveProfile(profile);
   const url = p.chatUrl;
+
+  // PAT (pt-...) can't sign COSY: exchange it for a short-lived job token and
+  // resolve the uid the signature needs. Device tokens (dt-...) and job tokens
+  // (jt-...) fall straight through untouched.
+  const rawToken = credentials?.accessToken || credentials?.apiKey;
+  if (isQoderPat(rawToken)) {
+    try {
+      const resolved = await resolvePatCredential(rawToken, {
+        profile: p,
+        proxyOptions,
+        signal,
+      });
+      credentials = {
+        ...credentials,
+        accessToken: resolved.accessToken,
+        apiKey: undefined,
+        providerSpecificData: {
+          authMethod: "pat",
+          ...(credentials?.providerSpecificData || {}),
+          // A PAT connection usually stores no userId, so the freshly resolved
+          // one (userinfo for this exact job token) wins; a stored value only
+          // acts as fallback when userinfo was unavailable.
+          userId: resolved.userId || credentials?.providerSpecificData?.userId || "",
+          machineId: credentials?.providerSpecificData?.machineId || "",
+        },
+      };
+    } catch (err) {
+      log?.error?.("QODER", `PAT exchange failed: ${err.message}`);
+      const fakeResp = new Response(
+        JSON.stringify({ error: { message: `qoder PAT exchange failed: ${err.message}` } }),
+        { status: 401, headers: { "Content-Type": "application/json" } },
+      );
+      return { response: fakeResp, url, headers: {}, transformedBody: body };
+    }
+  }
+
   const psd = credentials?.providerSpecificData || {};
 
   if (!psd.userId) {
