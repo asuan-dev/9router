@@ -16,6 +16,8 @@ import {
 import { getMitmStatus, startMitm, loadEncryptedPassword, initDbHooks, restoreToolDNS, removeAllDNSEntriesSync } from "@/mitm/manager";
 import { syncToJson as syncMitmAliasCache } from "@/lib/mitmAliasCache";
 import { killAllBridges } from "@/lib/mcp/stdioSseBridge";
+import { getAllDiscoveredCatalogs } from "@/lib/db/repos/discoveredModelsRepo";
+import { setLiveCapabilities } from "open-sse/providers/liveCapabilities.js";
 
 // Inject correct paths and DB hooks into manager.js (CJS) from ESM context
 (function bootstrapMitm() {
@@ -122,6 +124,20 @@ async function runHeavyStartup() {
       }
     })
     .catch((e) => console.log("[AUTO_CHECKIN] scheduler start failed:", e.message));
+  // Re-publish discovered model capabilities from the DB so the live overlay
+  // survives restarts — without this, a stale vision:false from the hand table
+  // would drop images until someone manually clicks "Sync models" again.
+  try {
+    const all = await getAllDiscoveredCatalogs();
+    for (const [provider, catalog] of Object.entries(all)) {
+      if (catalog?.caps && typeof catalog.caps === "object") {
+        setLiveCapabilities(provider, catalog.caps, { fetchedAt: catalog.fetchedAt, source: "boot-rehydrate" });
+      }
+    }
+    console.log(`[InitApp] Re-hydrated live capabilities for ${Object.keys(all).length} provider(s)`);
+  } catch (e) {
+    console.log("[InitApp] Live capability re-hydration failed:", e?.message);
+  }
 }
 
 function hasQuotaAutoPingEnabled(settings) {

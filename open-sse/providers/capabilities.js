@@ -23,6 +23,7 @@
 // 2.0+, Grok, Perplexity). Verify with: curl -s https://models.dev/api.json
 
 import { matchPattern } from "./pricing.js";
+import { getLiveCapability } from "./liveCapabilities.js";
 
 /**
  * Safe floor — every resolved result is merged over this so consumers
@@ -229,10 +230,19 @@ export const PROVIDER_CAPABILITIES = {
     "deepseek-v4-flash":  { vision: true,  reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1000000, maxOutput: 50000 },
     "deepseek-v3-2-volc": { vision: false, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 96000, maxOutput: 32000 },
   },
+  // AI_MODELS uses registry alias "cbcn" as the provider key, not "codebuddy-cn".
+  // Point both at the same caps — assigned after the object literal below
+  // (can't self-reference during initialization).
   // Qoder family — one caps table; intl + CN share wire (reasoning_effort).
   qoder: QODER_PROVIDER_MODEL_CAPS,
   "qoderwork-cn": QODER_PROVIDER_MODEL_CAPS,
 };
+
+// AI_MODELS uses registry alias "cbcn" as the provider key, not "codebuddy-cn".
+// Both spellings must resolve to the same caps.
+PROVIDER_CAPABILITIES.cbcn = PROVIDER_CAPABILITIES["codebuddy-cn"];
+PROVIDER_CAPABILITIES.qd = PROVIDER_CAPABILITIES.qoder;
+PROVIDER_CAPABILITIES.qdcn = PROVIDER_CAPABILITIES["qoderwork-cn"];
 
 /**
  * Pattern fallback — glob (* = wildcard), matched case-insensitively and
@@ -360,39 +370,76 @@ export const PATTERN_CAPABILITIES = [
   { pattern: "*nemotron*",      caps: { reasoning: true, contextWindow: 128000 } },
   { pattern: "*ling-*",         caps: { reasoning: true, contextWindow: 128000 } },
 ];
+/**
+ * Resolve the hand-maintained fallback chain (steps 1-4). Split out so the
+ * live overlay can merge over it without duplicating the lookup logic.
+ *
+ * @param {string} provider
+ * @param {string} model   raw id, may carry a vendor prefix
+ * @param {string} baseModel  prefix-stripped id
+ * @returns {object} static caps (NOT merged over DEFAULT — caller merges)
+ */
+function resolveStaticCapabilities(provider, model, baseModel) {
+  // 1. Provider-specific override
+  if (provider) {
+    const providerCaps = PROVIDER_CAPABILITIES[provider];
+    if (providerCaps?.[model]) return providerCaps[model];
+    if (providerCaps?.[baseModel]) return providerCaps[baseModel];
+  }
+
+  // 2. Canonical exact
+  if (MODEL_CAPABILITIES[baseModel]) return MODEL_CAPABILITIES[baseModel];
+  if (MODEL_CAPABILITIES[model]) return MODEL_CAPABILITIES[model];
+
+  // 3. Pattern match (first match wins)
+  for (const { pattern, caps } of PATTERN_CAPABILITIES) {
+    if (matchPattern(pattern, baseModel) || matchPattern(pattern, model)) {
+      return caps;
+    }
+  }
+
+  // 4. Floor — nothing found; empty patch over DEFAULT
+  return {};
+}
 
 /**
- * Resolve capabilities for a model using the 4-step fallback chain,
- * merged over DEFAULT_CAPABILITIES so the result is always complete.
+ * Resolve capabilities for a model.
+ *
+ * Priority (highest first), result merged over DEFAULT_CAPABILITIES:
+ *   0. Live overlay — server-published metadata (setLiveCapabilities).
+ *      Merged OVER the static result so fields the upstream API doesn't
+ *      express (e.g. thinkingFormat, a wire-shape decision) survive.
+ *   1. PROVIDER_CAPABILITIES[provider][model]
+ *   2. MODEL_CAPABILITIES[model]
+ *   3. PATTERN_CAPABILITIES (glob, ordered specific -> generic)
+ *   4. DEFAULT_CAPABILITIES (safe floor)
  *
  * @param {string} provider
  * @param {string} model
  * @returns {object} full capabilities object
  */
+// Registry alias -> provider id. AI_MODELS keys models by alias (e.g. "cbcn"),
+// but PROVIDER_CAPABILITIES and the live overlay key by provider id
+// ("codebuddy-cn"). Normalize so both spellings resolve to the same caps.
+const PROVIDER_ALIAS_NORMALIZE = { cbcn: "codebuddy-cn", qd: "qoder", qdcn: "qoderwork-cn" };
 export function getCapabilitiesForModel(provider, model) {
   if (!model) return { ...DEFAULT_CAPABILITIES };
 
-  // Canonical exact lookup strips vendor prefix: "anthropic/claude-opus-4.7" -> "claude-opus-4.7".
   const baseModel = model.includes("/") ? model.split("/").pop() : model;
+  const normProvider = PROVIDER_ALIAS_NORMALIZE[provider] || provider;
 
-  // 1. Provider-specific override
-  if (provider) {
-    const providerCaps = PROVIDER_CAPABILITIES[provider];
-    if (providerCaps?.[model]) return { ...DEFAULT_CAPABILITIES, ...providerCaps[model] };
-    if (providerCaps?.[baseModel]) return { ...DEFAULT_CAPABILITIES, ...providerCaps[baseModel] };
+  const staticCaps = resolveStaticCapabilities(normProvider, model, baseModel);
+
+  // 0. Live overlay (highest priority, merged over static).
+  // Query both the normalized id and the raw alias in case the overlay
+  // was published under either spelling.
+  const live = getLiveCapability(normProvider, model)
+    || getLiveCapability(normProvider, baseModel)
+    || getLiveCapability(provider, model)
+    || getLiveCapability(provider, baseModel);
+  if (live) {
+    return { ...DEFAULT_CAPABILITIES, ...staticCaps, ...live };
   }
 
-  // 2. Canonical exact
-  if (MODEL_CAPABILITIES[baseModel]) return { ...DEFAULT_CAPABILITIES, ...MODEL_CAPABILITIES[baseModel] };
-  if (MODEL_CAPABILITIES[model]) return { ...DEFAULT_CAPABILITIES, ...MODEL_CAPABILITIES[model] };
-
-  // 3. Pattern match (first match wins)
-  for (const { pattern, caps } of PATTERN_CAPABILITIES) {
-    if (matchPattern(pattern, baseModel) || matchPattern(pattern, model)) {
-      return { ...DEFAULT_CAPABILITIES, ...caps };
-    }
-  }
-
-  // 4. Floor
-  return { ...DEFAULT_CAPABILITIES };
+  return { ...DEFAULT_CAPABILITIES, ...staticCaps };
 }

@@ -10,7 +10,10 @@ import { resolveKimchiModels } from "open-sse/services/kimchiModels.js";
 import { resolveQoderModels } from "open-sse/services/qoderModels.js";
 import { resolveGrokCliModels } from "open-sse/services/grokCliModels.js";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
+import { resolveCodebuddyCnModels, mapCodebuddyCnCaps } from "open-sse/services/codebuddyCnModels.js";
 import { resolveCursorModels } from "open-sse/services/cursorModels.js";
+import { setLiveCapabilities } from "open-sse/providers/liveCapabilities.js";
+import { saveDiscoveredCatalog } from "@/lib/db/repos/discoveredModelsRepo";
 
 const GEMINI_CLI_MODELS_URL = "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels";
 
@@ -136,6 +139,63 @@ const buildOAuthResolver = ({ refreshFn, fetchFn, parseFn, errorLabel }) => asyn
   }
   return { models: [], warning };
 };
+
+// Shared cap mapping for Qoder variants — qoder + qoderwork-cn use the exact
+// same upstream fields (isVL / isReasoning / contextLength / maxOutputTokens).
+// One function kills the duplicated block that lived in both resolvers.
+function mapQoderCaps(m) {
+  return {
+    vision: m.isVL === true,
+    reasoning: m.isReasoning === true,
+    ...(m.contextLength ? { contextWindow: m.contextLength } : {}),
+    ...(m.maxOutputTokens ? { maxOutput: m.maxOutputTokens } : {}),
+  };
+}
+
+// Publish extracted capabilities to the live overlay + persist to DB.
+// Shared by every provider's customResolver — the only "framework" each new
+// provider needs. `rawModels` is the array from the upstream API; `mapCaps`
+// turns one raw model into a capability patch ({vision, reasoning, ...}).
+async function publishDiscoveredCaps(provider, rawModels, mapCaps) {
+  const capsByModel = {};
+  // Strip a leading "provider/" prefix if the upstream already decorated the
+  // id (qoder resolvers sometimes return bare keys, sometimes "qoder/key").
+  // Caps are always keyed by bare id so getCapabilitiesForModel(baseId) hits.
+  const bareId = (id) => {
+    if (typeof id !== "string") return id;
+    const prefix = `${provider}/`;
+    return id.startsWith(prefix) ? id.slice(prefix.length) : id;
+  };
+  for (const m of rawModels) {
+    if (!m?.id) continue;
+    const id = bareId(m.id);
+    const caps = mapCaps({ ...m, id });
+    if (caps && Object.keys(caps).length) capsByModel[id] = caps;
+  }
+  if (Object.keys(capsByModel).length) {
+    const fetchedAt = new Date().toISOString();
+    // Persist FIRST, then publish to the in-memory overlay. If we publish then
+    // fail to persist, a restart loses the overlay and falls back to the
+    // stale hand-table — exactly the vision:false drop this layer prevents.
+    try {
+      await saveDiscoveredCatalog(provider, {
+        models: Object.keys(capsByModel).map((id) => {
+          const raw = rawModels.find((m) => bareId(m?.id) === id);
+          return { id, name: raw?.name || id, caps: capsByModel[id] || {} };
+        }),
+        caps: capsByModel,
+        fetchedAt,
+        adapter: provider,
+      });
+      setLiveCapabilities(provider, capsByModel, { fetchedAt });
+    } catch (e) {
+      // Persist failed: publish to memory anyway so the current process still
+      // benefits, but log loudly — it won't survive restart.
+      console.error(`[discovery] persist ${provider} failed, overlay NOT persisted:`, e?.message);
+      setLiveCapabilities(provider, capsByModel, { fetchedAt, persistFailed: true });
+    }
+  }
+}
 
 // Provider models endpoints configuration
 const PROVIDER_MODELS_CONFIG = {
@@ -365,6 +425,7 @@ const PROVIDER_MODELS_CONFIG = {
       try {
         const result = await resolveQoderModels(credentials, { forceRefresh: true });
         if (result?.models?.length) {
+          await publishDiscoveredCaps("qoder", result.models, mapQoderCaps);
           return {
             models: result.models.map((m) => ({
               // Use the canonical "qoder/<key>" id so the dashboard
@@ -403,6 +464,7 @@ const PROVIDER_MODELS_CONFIG = {
           profile: "cn-work",
         });
         if (result?.models?.length) {
+          await publishDiscoveredCaps("qoderwork-cn", result.models, mapQoderCaps);
           return {
             models: result.models.map((m) => ({
               id: `qoderwork-cn/${m.id}`,
@@ -487,6 +549,15 @@ const PROVIDER_MODELS_CONFIG = {
       }
       const data = await response.json();
       return { models: parseOpenAIStyleModels(data) };
+    }
+  },
+  "codebuddy-cn": {
+    customResolver: async (connection) => {
+      const { models, rawModels, error, status } = await resolveCodebuddyCnModels(connection);
+      if (error) return { error, status };
+      // Publish capabilities to the live overlay + persist for boot re-hydration.
+      await publishDiscoveredCaps("codebuddy-cn", rawModels || [], mapCodebuddyCnCaps);
+      return { models };
     }
   }
 };
