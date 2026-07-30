@@ -7,6 +7,7 @@ export const REFRESH_INTERVAL_MS = 60000;
 export const CLAUDE_REFRESH_INTERVAL_MS = 180000;
 export const DEPLETED_QUOTA_THRESHOLD = 5;
 export const AUTO_REFRESH_STORAGE_KEY = "quotaAutoRefresh";
+export const SHOW_DEPLETED_STORAGE_KEY = "quotaShowDepleted";
 export const CONNECTIONS_PAGE_SIZE = 20;
 export const ACCOUNT_PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 export const ACCOUNT_PAGE_SIZE_MAX = 500;
@@ -325,6 +326,38 @@ export function getHiddenQuotaRows(provider, quotas = [], quotaVisibility = {}) 
 }
 
 /**
+ * Whether a quota row is "depleted": a pack/layer with no remaining credits
+ * to spend. A row is depleted when its total is 0 (a layer the upstream never
+ * returned, or an empty pack) or when its remaining is 0 (used up). Rows that
+ * still carry credits are not depleted. Used by the page-level "show depleted"
+ * toggle to hide empty rows by default.
+ *
+ * Some providers (e.g. github, claude) surface a quota row per model with a
+ * `remaining` field as an absolute count; others (qoder, codebuddy) keep it as
+ * credits. We therefore treat `remaining` as absolute when present, and fall
+ * back to (total - used) when it isn't.
+ */
+export function isQuotaDepleted(quota) {
+  if (!quota) return true;
+  const total = Number(quota.total) || 0;
+  if (total <= 0) return true;
+  const remaining = typeof quota.remaining === "number"
+    ? Number(quota.remaining) || 0
+    : Math.max(0, total - (Number(quota.used) || 0));
+  return remaining <= 0;
+}
+
+/**
+ * Drop depleted rows unless the caller asked to keep them. Mirrors the
+ * filterQuotasByVisibility shape so the two filters compose cleanly.
+ */
+export function filterDepletedQuotas(quotas = [], showDepleted = false) {
+  if (!Array.isArray(quotas) || quotas.length === 0) return [];
+  if (showDepleted) return quotas;
+  return quotas.filter((quota) => !isQuotaDepleted(quota));
+}
+
+/**
  * Parse provider-specific quota structures into normalized array
  * @param {string} provider - Provider name (github, antigravity, codex, kiro, claude)
  * @param {Object} data - Raw quota data from provider
@@ -394,21 +427,20 @@ export function parseQuotaData(provider, data) {
 
       case "qoder":
       case "qoderwork-cn":
-        // Qoder ships a `user` quota and (optionally) an `organization`
-        // quota, both with same shape: {total, used, remaining, unit, resetAt}.
-        // Skip an organization bucket when its total is 0 — most personal
-        // Qoder accounts won't have one and rendering "0/0" is misleading.
-        // Don't forward Qoder's `remaining` field: it's an absolute credit
-        // count, but getRemainingPercentage / QuotaTable interpret
-        // `remaining` as a 0-100 percentage and would render 348 credits
-        // as "348%". The percentage is computed from used/total instead.
+        // QoderWork ships three layers: user (base plan), addOn (Pro-upgrade
+        // / checkin / purchased add-ons), organization (org resource package).
+        // We keep ALL layers here and let the "show depleted" toggle on the
+        // page header decide whether an empty layer gets a row — that way the
+        // same control that hides used-up CodeBuddy bonus packs also hides a
+        // zero-credit Qoder layer consistently. Don't forward `remaining`:
+        // it's an absolute credit count, but QuotaTable interprets remaining
+        // as a 0-100 percentage. The percentage is computed from used/total.
+        const QODER_LABELS = { user: "Personal", addOn: "Add-on", organization: "Organization" };
         if (data.quotas) {
           Object.entries(data.quotas).forEach(([quotaType, quota]) => {
-            if (quotaType === "organization" && (!quota || (Number(quota.total) || 0) === 0)) {
-              return;
-            }
+            if (!quota) return;
             normalizedQuotas.push({
-              name: quotaType === "user" ? "Personal" : quotaType === "organization" ? "Organization" : quotaType,
+              name: QODER_LABELS[quotaType] || quotaType,
               used: quota.used || 0,
               total: quota.total || 0,
               unit: quota.unit,
@@ -462,9 +494,12 @@ export function parseQuotaData(provider, data) {
         // CodeBuddy CN mixes recurring refill packs ("Monthly"/"Weekly"/...)
         // with one-shot bonus packs ("Bonus Pack N"). Forward `recurring`
         // so the UI can show "Expires in" for bonus packs (whose resetAt is
-        // a hard expiry, not a refresh) instead of "Reset in".
+        // a hard expiry, not a refresh) instead of "Reset in". Keep every
+        // pack (including used-up/empty ones) and let the page-level "show
+        // depleted" toggle hide empty rows — same rule for all providers.
         if (data.quotas) {
           Object.entries(data.quotas).forEach(([name, quota]) => {
+            if (!quota) return;
             normalizedQuotas.push({
               name,
               used: quota.used || 0,

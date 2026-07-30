@@ -9,6 +9,8 @@ import {
   parseQuotaData,
   calculatePercentage,
   filterQuotasByVisibility,
+  filterDepletedQuotas,
+  isQuotaDepleted,
   getHiddenQuotaRows,
   getQuotaVisibilityKey,
   getConnectionLabel,
@@ -31,7 +33,7 @@ import {
   REFRESH_INTERVAL_MS,
   CLAUDE_REFRESH_INTERVAL_MS,
   DEPLETED_QUOTA_THRESHOLD,
-  AUTO_REFRESH_STORAGE_KEY,
+  SHOW_DEPLETED_STORAGE_KEY,
   CONNECTIONS_PAGE_SIZE,
   ACCOUNT_PAGE_SIZE_OPTIONS,
   ACCOUNT_PAGE_SIZE_MAX,
@@ -39,9 +41,10 @@ import {
   QUOTA_SORT_OPTIONS,
 } from "./utils";
 import Card from "@/shared/components/Card";
-import { ConfirmModal, EditConnectionModal } from "@/shared/components";
+import { ConfirmModal, EditConnectionModal, IconToggleButton } from "@/shared/components";
 import { USAGE_SUPPORTED_PROVIDERS } from "@/shared/constants/providers";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
+import { useLocalStorageBoolean } from "@/shared/hooks/useLocalStorageBoolean";
 
 // Maps the stored providerSpecificData.authMethod to a human label for Kiro.
 // Values come from the Kiro connect flows: builder-id/idc (device code),
@@ -130,10 +133,10 @@ export default function ProviderLimits() {
   const [quotaData, setQuotaData] = useState({});
   const [loading, setLoading] = useState({});
   const [errors, setErrors] = useState({});
-  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [autoRefresh, setAutoRefresh, hasHydratedAutoRefresh] = useLocalStorageBoolean(AUTO_REFRESH_STORAGE_KEY, true);
   const [autoPingMaps, setAutoPingMaps] = useState({ claude: {}, codex: {} });
   const [lastUpdated, setLastUpdated] = useState(null);
-  const [hasHydratedAutoRefresh, setHasHydratedAutoRefresh] = useState(false);
+  const [showDepleted, setShowDepleted] = useLocalStorageBoolean(SHOW_DEPLETED_STORAGE_KEY, false);
   const [refreshingAll, setRefreshingAll] = useState(false);
   const [countdown, setCountdown] = useState(60);
   const [connectionsLoading, setConnectionsLoading] = useState(true);
@@ -523,18 +526,6 @@ export default function ProviderLimits() {
     initializeData();
   }, [fetchConnections, fetchQuota, page]);
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const stored = window.localStorage.getItem(AUTO_REFRESH_STORAGE_KEY);
-    setAutoRefresh(stored === null ? true : stored === "true");
-    setHasHydratedAutoRefresh(true);
-  }, []);
-
-  // Persist auto-refresh preference
-  useEffect(() => {
-    if (typeof window === "undefined" || !hasHydratedAutoRefresh) return;
-    window.localStorage.setItem(AUTO_REFRESH_STORAGE_KEY, String(autoRefresh));
-  }, [autoRefresh, hasHydratedAutoRefresh]);
 
   // Load auto-ping per-connection maps
   useEffect(() => {
@@ -971,27 +962,26 @@ export default function ProviderLimits() {
           </button>
 
           {/* Auto-refresh toggle */}
-          <button
-            onClick={() => setAutoRefresh((prev) => !prev)}
-            className="flex h-8 shrink-0 items-center gap-1 rounded-lg border border-black/10 px-2 text-xs transition-colors hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/5"
+          <IconToggleButton
+            active={autoRefresh}
+            onClick={(v) => setAutoRefresh(v)}
+            label="Auto-refresh"
             title={autoRefresh ? "Disable auto-refresh" : "Enable auto-refresh"}
           >
-            <span
-              className={`material-symbols-outlined text-[14px] ${
-                autoRefresh ? "text-primary" : "text-text-muted"
-              }`}
-            >
-              {autoRefresh ? "toggle_on" : "toggle_off"}
-            </span>
-            <span className="hidden text-text-primary sm:inline">
-              Auto-refresh
-            </span>
             {autoRefresh && (
               <span className="text-[10px] text-text-muted tabular-nums">
                 ({countdown}s)
               </span>
             )}
-          </button>
+          </IconToggleButton>
+
+          {/* Show depleted quota rows toggle */}
+          <IconToggleButton
+            active={showDepleted}
+            onClick={(v) => setShowDepleted(v)}
+            label="Used up"
+            title={showDepleted ? "Hide used-up / empty quota rows" : "Show used-up / empty quota rows"}
+          />
 
 
           {/* Refresh all button */}
@@ -1032,7 +1022,10 @@ export default function ProviderLimits() {
           const isResettingLimit = resettingLimitId === conn.id;
           const rowBusy = deletingId === conn.id || togglingId === conn.id || isResettingLimit;
           const rawQuotas = quota?.quotas || [];
-          const visibleQuotas = filterQuotasByVisibility(conn.provider, rawQuotas, quotaVisibility);
+          const visibleQuotas = filterDepletedQuotas(
+            filterQuotasByVisibility(conn.provider, rawQuotas, quotaVisibility),
+            showDepleted,
+          );
           const hiddenQuotaRows = getHiddenQuotaRows(conn.provider, rawQuotas, quotaVisibility);
 
           return (

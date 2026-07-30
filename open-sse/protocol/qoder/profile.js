@@ -34,6 +34,9 @@ import {
  * @property {string} modelListUrl
  * @property {string} quotaUrl
  * @property {string} deviceTokenUrl
+ * @property {string} [quotaUserAgent] - User-Agent the quota endpoint
+ *   requires (CN returns 401 without it; intl has no such constraint).
+ *   Evidence: lab/qoderwork-cn/references/api-inventory-0.6.7.md#L25
  * @property {string} userInfoUrl
  * @property {string} loginUrl
  * @property {string} [refreshTokenUrl]
@@ -68,6 +71,10 @@ export const INTL_PROFILE = {
   userInfoUrl: QODER_USERINFO_URL,
   loginUrl: QODER_LOGIN_URL,
   refreshTokenUrl: INTL_DEVICE_REFRESH_URL,
+  // CLI (qodercli) sends client_id on the login URL for intl too — without it
+  // the server treats the registration as "dashboard.email_pwd" instead of a
+  // CLI/IDE login, which blocks activity-claim eligibility.
+  deviceClientId: "e883ade2-e6e3-4d6d-adf7-f92ceff5fdcb",
   sessionType: "qodercli",
   businessProduct: "cli",
   businessVersion: "1.0.0",
@@ -93,6 +100,9 @@ export const CN_WORK_PROFILE = {
   openApiBase: CN_OPENAPI,
   chatBase: CN_GATEWAY,
   centerBase: CN_GATEWAY,
+  // openapi.qoder.com.cn rejects quota requests without this UA (401 even with
+  // a valid token). Intl has no such constraint. See api-inventory-0.6.7.md#L25.
+  quotaUserAgent: "QoderWork",
   chatUrl: CN_CHAT_URL,
   modelListUrl: `${CN_GATEWAY}/algo/api/v2/model/list?Encode=1`,
   quotaUrl: `${CN_OPENAPI}/api/v2/quota/usage`,

@@ -24,6 +24,10 @@ export async function getQuota(accessToken, options = {}) {
         headers: {
           Authorization: `Bearer ${accessToken}`,
           Accept: "application/json",
+          // CN's openapi rejects quota requests without this UA (401 even
+          // with a valid token). Intl has no such constraint, so the header
+          // is optional on the profile and only sent when set.
+          ...(profile.quotaUserAgent ? { "User-Agent": profile.quotaUserAgent } : {}),
         },
       },
       options.proxyOptions ?? null,
@@ -35,27 +39,30 @@ export async function getQuota(accessToken, options = {}) {
     if (!body) {
       return { message: "Qoder connected. Usage response was not JSON." };
     }
+    // QoderWork splits credits across three layers (matching the client's
+    // own Yt() sum). Each layer is stored separately so the tracker can
+    // show one row per layer instead of collapsing them into one number.
+    //   user         — base plan credits
+    //   addOn        — Pro-upgrade / daily-checkin / purchased add-ons
+    //   organization — org resource package
     const userQuota = body.userQuota || {};
+    const addOnQuota = body.addOnQuota || {};
     const orgQuota = body.orgResourcePackage || {};
     const expiresAtMs = Number.isFinite(Number(body.expiresAt)) && Number(body.expiresAt) > 0
       ? Number(body.expiresAt)
       : null;
     const resetAt = expiresAtMs ? new Date(expiresAtMs).toISOString() : null;
+    const layer = (q) => ({
+      total: Number(q.total) || 0,
+      used: Number(q.used) || 0,
+      remaining: Number(q.remaining) || 0,
+      unit: q.unit || "credits",
+      resetAt,
+    });
     const quotas = {
-      user: {
-        total: Number(userQuota.total) || 0,
-        used: Number(userQuota.used) || 0,
-        remaining: Number(userQuota.remaining) || 0,
-        unit: userQuota.unit || "credits",
-        resetAt,
-      },
-      organization: {
-        total: Number(orgQuota.total) || 0,
-        used: Number(orgQuota.used) || 0,
-        remaining: Number(orgQuota.remaining) || 0,
-        unit: orgQuota.unit || "credits",
-        resetAt,
-      },
+      user: layer(userQuota),
+      addOn: layer(addOnQuota),
+      organization: layer(orgQuota),
     };
     return {
       quotas,
