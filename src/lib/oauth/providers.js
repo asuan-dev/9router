@@ -680,7 +680,7 @@ const PROVIDERS = {
     // browser, and we poll openapi.qoder.sh until a `dt-...` token appears.
     requestDeviceCode: async (config) => {
       const { QoderService } = await import("@/lib/oauth/services/qoder");
-      const flow = new QoderService({ profile: "intl" }).initiateDeviceFlow();
+      const flow = await new QoderService({ profile: "intl" }).initiateDeviceFlow();
       // Match the device_code shape the rest of the OAuthModal expects
       // (device_code, user_code, verification_uri[_complete], interval).
       // The poll endpoint identifies us by nonce+verifier, not by a
@@ -777,7 +777,7 @@ const PROVIDERS = {
     flowType: "device_code",
     requestDeviceCode: async (config) => {
       const { QoderService } = await import("@/lib/oauth/services/qoder");
-      const flow = new QoderService({ profile: config.protocolProfile || "cn-work" }).initiateDeviceFlow();
+      const flow = await new QoderService({ profile: config.protocolProfile || "cn-work" }).initiateDeviceFlow();
       return {
         device_code: flow.nonce,
         user_code: flow.nonce.slice(0, 8).toUpperCase(),

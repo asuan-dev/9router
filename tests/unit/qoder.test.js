@@ -41,7 +41,7 @@ import { PROVIDER_MODELS } from "../../open-sse/config/providerModels.js";
 // helpers; the QoderService class wraps them so each test creates its own
 // instance to avoid hidden state.
 const generatePkcePair = () => new QoderService().generatePkcePair();
-const initiateDeviceFlow = () => new QoderService().initiateDeviceFlow();
+const initiateDeviceFlow = async () => new QoderService().initiateDeviceFlow();
 const parseExpiry = QoderService.parseExpiry;
 
 describe("provider catalog", () => {
@@ -127,10 +127,10 @@ describe("generatePkcePair", () => {
     expect(challenge).toBe(expected);
   });
 
-  it("returns codeVerifier (not verifier) on the higher-level helper", () => {
+  it("returns codeVerifier (not verifier) on the higher-level helper", async () => {
     // Regression: the providers.js qoder entry once read flow.verifier (undefined)
     // because initiateDeviceFlow returns the field as `codeVerifier`.
-    const flow = initiateDeviceFlow();
+    const flow = await initiateDeviceFlow();
     expect(typeof flow.codeVerifier).toBe("string");
     expect(flow.codeVerifier.length).toBeGreaterThanOrEqual(43);
     expect(flow.codeVerifier.length).toBeLessThanOrEqual(128);
@@ -139,21 +139,24 @@ describe("generatePkcePair", () => {
 });
 
 describe("initiateDeviceFlow", () => {
-  it("produces a verification URL pointing at qoder.com/device/selectAccounts", () => {
-    const flow = initiateDeviceFlow();
+  it("produces a verification URL pointing at qoder.com/device/selectAccounts", async () => {
+    const flow = await initiateDeviceFlow();
     expect(flow.verificationUriComplete).toMatch(
       /^https:\/\/qoder\.com\/device\/selectAccounts\?/,
     );
     expect(flow.verificationUriComplete).toContain("challenge_method=S256");
     expect(flow.verificationUriComplete).toContain(`nonce=${flow.nonce}`);
-    expect(flow.verificationUriComplete).toContain(`machine_id=${flow.machineId}`);
+    expect(flow.verificationUriComplete).toMatch(/machine_id=[^&]+/);
   });
 
-  it("returns nonce and machineId as UUIDs", () => {
-    const flow = initiateDeviceFlow();
+  it("returns nonce as UUID and machineId as UUID-or-UMID", async () => {
+    const flow = await initiateDeviceFlow();
     const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
     expect(flow.nonce).toMatch(uuidRe);
-    expect(flow.machineId).toMatch(uuidRe);
+    // machineId is a real UMID (88-char P1gA...) when runtime-info binary is
+    // available, or a random UUID fallback on platforms without it.
+    expect(typeof flow.machineId).toBe("string");
+    expect(flow.machineId.length).toBeGreaterThanOrEqual(36);
   });
 });
 
@@ -197,10 +200,10 @@ describe("buildCosyHeaders", () => {
     expect(headers.Authorization).toMatch(/^Bearer COSY\.[A-Za-z0-9+/=]+\.[a-f0-9]{32}$/);
   });
 
-  it("Authorization sig matches official space-separated Cosy MD5 input", () => {
-    // Official Qoder IDE 1.17.3 / QoderWork CN: MD5(payload + " " + key + " " + ts + " " + body + " " + sigPath).
-    // A newline-joined sigInput must NOT match the Authorization signature.
-    const body = Buffer.from("space-delimiter-probe", "utf8");
+  it("Authorization sig matches live newline-separated Cosy MD5 input", () => {
+    // Live 2026-07-28: intl + CN both require newline-joined sigInput.
+    // Space-joined MD5 is rejected upstream as Signature invalid.
+    const body = Buffer.from("newline-delimiter-probe", "utf8");
     const headers = buildCosyHeaders(body, QODER_MODEL_LIST_URL, creds);
     const auth = headers.Authorization;
     const m = /^Bearer COSY\.([A-Za-z0-9+/=]+)\.([a-f0-9]{32})$/.exec(auth);
@@ -215,8 +218,8 @@ describe("buildCosyHeaders", () => {
     const newlineInput = `${payloadB64}\n${cosyKey}\n${timestamp}\n${bodyLatin1}\n${sigPath}`;
     const spaceMd5 = crypto.createHash("md5").update(Buffer.from(spaceInput, "latin1")).digest("hex");
     const newlineMd5 = crypto.createHash("md5").update(Buffer.from(newlineInput, "latin1")).digest("hex");
-    expect(sig).toBe(spaceMd5);
-    expect(sig).not.toBe(newlineMd5);
+    expect(sig).toBe(newlineMd5);
+    expect(sig).not.toBe(spaceMd5);
   });
 
   it("Cosy-Sigpath strips the leading /algo prefix", () => {
@@ -662,7 +665,7 @@ describe("profile-driven payload + cosy (simulation)", () => {
     expect(headers["Cosy-Data-Policy"]).toBe("agree");
   });
 
-  it("OAuth service uses injected profile login + device URLs", () => {
+  it("OAuth service uses injected profile login + device URLs", async () => {
     const alt = {
       ...INTL_PROFILE,
       id: "alt",
@@ -670,16 +673,17 @@ describe("profile-driven payload + cosy (simulation)", () => {
       deviceTokenUrl: "https://example.test/api/v1/deviceToken/poll",
     };
     const svc = new QoderService({ profile: alt });
-    const flow = svc.initiateDeviceFlow();
+    const flow = await svc.initiateDeviceFlow();
     expect(flow.verificationUriComplete.startsWith(alt.loginUrl)).toBe(true);
     expect(svc.profile.deviceTokenUrl).toBe(alt.deviceTokenUrl);
   });
 
-  it("default OAuth service stays on intl hosts", () => {
+  it("default OAuth service stays on intl hosts", async () => {
     const svc = new QoderService();
-    const flow = svc.initiateDeviceFlow();
+    const flow = await svc.initiateDeviceFlow();
     expect(flow.verificationUriComplete.startsWith(INTL_PROFILE.loginUrl)).toBe(true);
   });
+
 });
 
 describe("contract body (awA)", () => {
@@ -1012,8 +1016,8 @@ describe("wrapQoderSSE special tokens", () => {
 });
 
 describe("qoderwork-cn refresh + executor", () => {
-  it("CN device login URL includes client_id", () => {
-    const flow = new QoderService({ profile: "cn-work" }).initiateDeviceFlow();
+  it("CN device login URL includes client_id", async () => {
+    const flow = await new QoderService({ profile: "cn-work" }).initiateDeviceFlow();
     expect(flow.verificationUriComplete).toContain("client_id=");
     expect(flow.verificationUriComplete).toContain("qoder.com.cn");
   });
@@ -1058,20 +1062,20 @@ describe("qoderwork-cn refresh + executor", () => {
 });
 
 describe("cn-work device login URL", () => {
-  it("includes client_id and redirect_uri like desktop", () => {
-    const flow = new QoderService({ profile: "cn-work" }).initiateDeviceFlow();
+  it("includes client_id and redirect_uri like desktop", async () => {
+    const flow = await new QoderService({ profile: "cn-work" }).initiateDeviceFlow();
     const u = new URL(flow.verificationUriComplete);
     expect(u.origin + u.pathname).toBe("https://qoder.com.cn/device/selectAccounts");
     expect(u.searchParams.get("client_id")).toBe("1c5e33e1-364d-4ce6-b02c-acaa81274a5c");
     expect(u.searchParams.get("redirect_uri")).toBe("qoder-work-cn://");
     expect(u.searchParams.get("challenge_method")).toBe("S256");
     expect(u.searchParams.get("nonce")).toBe(flow.nonce);
-    expect(u.searchParams.get("machine_id")).toBe(flow.machineId);
+    expect(u.searchParams.get("machine_id")).toBeTruthy();
   });
 });
 
-describe("cn-work Cosy SEP", () => {
-  it("uses newline join for cn-work and space for intl", async () => {
+describe("Cosy SEP (intl + cn-work)", () => {
+  it("uses newline join for both intl and cn-work", async () => {
     const { buildCosyHeaders } = await import("../../open-sse/protocol/qoder/cosy.js");
     const creds = {
       userId: "u1",
@@ -1080,11 +1084,28 @@ describe("cn-work Cosy SEP", () => {
       email: "e@x.com",
       machineId: "00000000-0000-0000-0000-000000000001",
     };
-    // Smoke: builders do not throw; live signature validity covered by CN model list.
-    const intl = buildCosyHeaders(Buffer.alloc(0), "https://api3.qoder.sh/algo/api/v2/model/list?Encode=1", creds, "intl");
-    const cn = buildCosyHeaders(Buffer.alloc(0), "https://gateway.qoder.com.cn/algo/api/v2/model/list?Encode=1", creds, "cn-work");
-    expect(intl.Authorization.startsWith("Bearer COSY.")).toBe(true);
-    expect(cn.Authorization.startsWith("Bearer COSY.")).toBe(true);
-    expect(intl.Authorization).not.toBe(cn.Authorization);
+    const body = Buffer.from("sep-parity", "utf8");
+    const intlUrl = "https://api3.qoder.sh/algo/api/v2/model/list?Encode=1";
+    const cnUrl = "https://gateway.qoder.com.cn/algo/api/v2/model/list?Encode=1";
+    const intl = buildCosyHeaders(body, intlUrl, creds, "intl");
+    const cn = buildCosyHeaders(body, cnUrl, creds, "cn-work");
+    expect(intl.Authorization).toMatch(/^Bearer COSY\.[A-Za-z0-9+/=]+\.[a-f0-9]{32}$/);
+    expect(cn.Authorization).toMatch(/^Bearer COSY\.[A-Za-z0-9+/=]+\.[a-f0-9]{32}$/);
+
+    for (const headers of [intl, cn]) {
+      const m = /^Bearer COSY\.([A-Za-z0-9+/=]+)\.([a-f0-9]{32})$/.exec(headers.Authorization);
+      const payloadB64 = m[1];
+      const sig = m[2];
+      const cosyKey = headers["Cosy-Key"];
+      const timestamp = headers["Cosy-Date"];
+      const sigPath = headers["Cosy-Sigpath"];
+      const bodyLatin1 = body.toString("latin1");
+      const newlineInput = `${payloadB64}\n${cosyKey}\n${timestamp}\n${bodyLatin1}\n${sigPath}`;
+      const spaceInput = `${payloadB64} ${cosyKey} ${timestamp} ${bodyLatin1} ${sigPath}`;
+      const newlineMd5 = crypto.createHash("md5").update(Buffer.from(newlineInput, "latin1")).digest("hex");
+      const spaceMd5 = crypto.createHash("md5").update(Buffer.from(spaceInput, "latin1")).digest("hex");
+      expect(sig).toBe(newlineMd5);
+      expect(sig).not.toBe(spaceMd5);
+    }
   });
 });

@@ -120,8 +120,10 @@ async function fetchQoderCatalogRaw(credentials, signal, proxyOptions = null, pr
     // Always cache the config — chat needs model_config even for UI-hidden
     // models (enable:false). Upstream still accepts chat for these keys.
     rawConfigs.set(key, entry);
-    if (entry.enable === false) continue;
 
+    // Surface the full live catalog to Fetch Models / dashboard. Account
+    // enable flags vary a lot on intl free tiers (often only ultimate=true);
+    // filtering them out made "获取模型" look empty even when catalog worked.
     const display =
       entry.display_name ||
       entry.displayName ||
@@ -137,6 +139,7 @@ async function fetchQoderCatalogRaw(credentials, signal, proxyOptions = null, pr
       isReasoning: !!entry.is_reasoning,
       maxOutputTokens: Number(entry.max_output_tokens) || 0,
       description: entry.description || "",
+      enabled: entry.enable !== false,
     });
   }
 

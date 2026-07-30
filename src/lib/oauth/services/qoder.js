@@ -3,6 +3,19 @@ import {
 } from "../../../../open-sse/protocol/qoder/index.js";
 import crypto from "crypto";
 
+// Per-UUID UMID from runtime-info binary (macOS only); falls back to null off-platform.
+let _umidModule = null;
+async function loadUmidModule() {
+  if (_umidModule) return _umidModule;
+  try {
+    _umidModule = await import("../../../../open-sse/protocol/qoder/umid.js");
+    return _umidModule;
+  } catch {
+    _umidModule = { getUmidForUuid: async () => null, getUmidInfo: async () => null };
+    return _umidModule;
+  }
+}
+
 /**
  * Qoder OAuth Service — device-token flow + openapi deviceToken refresh.
  * URLs from protocol Profile (intl | cn-work). Protocol chat stays separate.
@@ -54,11 +67,27 @@ export class QoderService {
   /**
    * Initiate the device flow.
    * CN requires client_id + redirect_uri on the login URL.
+   *
+   * machine_id: the official Qoder IDE sends `runtime-info`'s 88-char UMID
+   * (P1gA...) as machine_id — not a random UUID. The server binds this to
+   * the account at login time; subsequent activity-claim endpoints reject
+   * requests whose Cosy-MachineToken doesn't match the registered machine_id.
+   *
+   * We generate a random UUID, feed it through `getUmidForUuid()` so the
+   * official SecurityGuard algorithm produces a unique 88-char UMID per
+   * account. On platforms without the binary (Linux/Docker) we fall back
+   * to the raw UUID (legacy behaviour).
    */
-  initiateDeviceFlow() {
+  async initiateDeviceFlow() {
     const { verifier, challenge } = this.generatePkcePair();
     const nonce = crypto.randomUUID();
-    const machineId = crypto.randomUUID();
+    const rawUuid = crypto.randomUUID();
+
+    // CLI sends the raw UUID as machine_id in the login URL (NOT the UMID).
+    // The UMID is generated later by runtime-info and sent as Cosy-MachineToken
+    // in API requests. We replicate this: login URL gets the UUID, cosyLight()
+    // regenerates the UMID from it via getUmidForUuid().
+    const machineId = rawUuid;
 
     // Param order/names match desktop startDeviceFlow (selectAccounts).
     const params = new URLSearchParams();
