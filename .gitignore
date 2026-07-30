@@ -86,3 +86,11 @@ graphify-out/*
 .codegraph/
 .PR/
 .next-analyze/*
+
+# Local-only research output + agent scratch (never product code)
+research/
+.agents/
+panda_*.json
+panda_*.log
+process_*.py
+test_plan.mjs
