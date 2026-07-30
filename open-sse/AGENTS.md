@@ -16,6 +16,7 @@ Provider-agnostic SSE engine: one OpenAI-style request → any provider (LLM cha
 - `rtk/` — request token-killer. `index.js` compresses `tool_result` content in-place (OpenAI/Claude/Kiro shapes); `filters/` per-tool compressors + `autodetect.js`; `headroom.js` external compress proxy; `caveman.js` system-prompt injector.
 - `transformer/` — `responsesTransformer.js` (Chat Completions SSE → Codex Responses API SSE), `streamToJsonConverter.js`.
 - `shared/` — cross-provider auth/identity: `clineAuth.js`, `machineId.js`.
+- `protocol/codebuddy/` — CodeBuddy CN **minimal** OpenAI Chat allowlist + SSE dirt normalize (no private shell). Public: `sanitizeChatBody` / `normalizeChatChunk`.
 - `protocol/qoder/` — Qoder protocol **deep module** (contract: repo `lab/qodercli/README.md` + `lab/qodercli/docs/field-ops-chat-to-qoder.md`) (Cosy, encode, chat body/SSE, catalog, quota, profiles). Public surface: `chat` / catalog / `getQuota` / `resolveProfile` / `createProtocol`. Internals for tests: `test-utils.js`. Region/product is Profile data (**intl only** in production; CN = add Profile later, no fork).
 - `services/` — `model.js`, `provider.js`, `accountFallback.js`, `combo.js`, `compact.js`, `tokenRefresh/`+`tokenRefresh.js`, `oauthCredentialManager.js`, `usage/`, `projectId.js`, `kiroModels.js`/`qoderModels.js`, `activities/` (e.g. codebuddy-cn check-in — **not** inside protocol chat).
 - OAuth for Qoder lives in `src/lib/oauth/services/qoder.js` (credentials only; URLs from protocol Profile).

@@ -5,6 +5,9 @@ import { PROVIDERS } from "../config/providers.js";
 
 const PLACEHOLDER = " ";
 
+// Multi-vendor OpenAI gateways: model-id MODEL_RULES must not apply (vendor-native only).
+const SKIP_MODEL_ID_REASONING_INJECT = new Set(["codebuddy-cn"]);
+
 // Provider-level rules derive from registry transport.reasoningInject (single source)
 const providerRuleFor = (provider) => PROVIDERS[provider]?.reasoningInject;
 
@@ -69,7 +72,9 @@ function applyDeepSeekV4ProAlias({ provider, model, body }) {
 
 export function injectReasoningContent({ provider, model, body }) {
   const providerRule = providerRuleFor(provider);
-  const modelRule = MODEL_RULES.find(r => r.match(model));
+  const modelRule = SKIP_MODEL_ID_REASONING_INJECT.has(provider)
+    ? null
+    : MODEL_RULES.find(r => r.match(model));
   const rule = providerRule || modelRule;
   const nextBody = applyDeepSeekV4ProAlias({ provider, model, body });
   return applyRule(nextBody, rule);
