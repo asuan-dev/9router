@@ -22,7 +22,11 @@ export default {
   hasProviderSpecificData: true,
   transport: {
     baseUrl: "https://api.cloudflare.com/client/v4/accounts/{accountId}/ai/v1/chat/completions",
-    thinkingFormat: "openai",
+    // No provider-level thinkingFormat: let each model resolve its own capability format.
+    // Cloudflare Workers AI (SGLang backend) accepts reasoning_effort none/low/medium/high/max
+    // and REJECTS "xhigh"/"minimal". The generic "openai" format emits "xhigh" (max→xhigh),
+    // which 400s every kimi request. Per-model caps (e.g. kimi format: xhigh→max, minimal→low)
+    // map cleanly onto CF's enum, so we defer to them here.
   },
   models: [
     { id: "@cf/meta/llama-3.2-1b-instruct", name: "Llama 3.2 1B Instruct" },

@@ -70,6 +70,10 @@ async function initAdapter() {
 
   const { runMigrationOnce } = await import("./migrate.js");
   await runMigrationOnce(adapter);
+
+  const { startSnapshotSchedule } = await import("./snapshot.js");
+  startSnapshotSchedule(adapter);
+
   return adapter;
 }
 

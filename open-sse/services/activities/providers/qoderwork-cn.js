@@ -26,6 +26,24 @@ async function request(method, url, token, proxyOptions, body = null) {
   return { status: response.status, data, ok: response.ok };
 }
 
+/**
+ * Raw daily-check-in status for the profile-refresh route, which maps the
+ * unmodified sash body into connection badge fields via mapQoderworkCheckinStatus.
+ * Returns { ok, data } (data = raw JSON body); does not normalize.
+ * @param {string} token
+ * @param {object|null} proxyOptions
+ * @returns {Promise<{ ok: boolean, data: object|null }>}
+ */
+export async function getQoderworkCheckinStatus(token, proxyOptions = null) {
+  if (!token) return { ok: false, data: null };
+  try {
+    const { data, ok } = await request("GET", STATUS_URL, token, proxyOptions);
+    return { ok: ok && data?.success !== false, data };
+  } catch {
+    return { ok: false, data: null };
+  }
+}
+
 export const qoderworkCnProvider = {
   providerId: "qoderwork-cn",
   timezone: "Asia/Shanghai",

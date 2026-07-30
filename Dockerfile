@@ -33,6 +33,10 @@ COPY --from=builder /app/custom-server.js ./custom-server.js
 COPY --from=builder /app/open-sse ./open-sse
 # Next file tracing can omit sibling files; MITM runs server.js as a separate process.
 COPY --from=builder /app/src/mitm ./src/mitm
+# Next file tracing can also omit db repos imported only from API routes /
+# initializeApp. Without this, saveDiscoveredCatalog fails at runtime and
+# boot rehydrate is a no-op — the exact vision:false restart window we prevent.
+COPY --from=builder /app/src/lib/db ./src/lib/db
 # Standalone node_modules may omit deps only required by the MITM child process.
 COPY --from=builder /app/node_modules/node-forge ./node_modules/node-forge
 # Ensure `next` is available at runtime in case tracing did not include it.

@@ -6,7 +6,7 @@ import {
   mapQoderworkCheckinStatus,
   shanghaiDayKey,
 } from "@/shared/utils/qoderworkProfile";
-import { getQoderworkCheckinStatus } from "open-sse/services/activities/qoderwork-cn.js";
+import { getQoderworkCheckinStatus } from "open-sse/services/activities/providers/qoderwork-cn.js";
 
 export const dynamic = "force-dynamic";
 
