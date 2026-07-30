@@ -30,6 +30,10 @@ const AUTO_PING_SETTINGS_KEYS = {
   codex: "codexAutoPing",
 };
 
+// Providers whose live model catalog (fetched from /api/providers/[id]/models)
+// replaces the static registry on the dashboard — same pattern as cursor.
+const LIVE_CATALOG_PROVIDERS = new Set(["cursor", "codebuddy-cn", "qoder", "qoderwork-cn"]);
+
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -80,7 +84,8 @@ export default function ProviderDetailPage() {
   const [oneByOneResults, setOneByOneResults] = useState({});
   const [oneByOneSummary, setOneByOneSummary] = useState(null);
   const stopOneByOneRef = useRef(false);
-  const [importingQoderModels, setImportingQoderModels] = useState(false);
+  const [syncingModels, setSyncingModels] = useState(false);
+  const [syncResult, setSyncResult] = useState(null);
   const { copied, copy } = useCopyToClipboard();
 
   const AG_RISK_STORAGE_KEY = "ag_risk_confirmed";
@@ -146,7 +151,7 @@ export default function ProviderDetailPage() {
   const supportsApiKeyAuth = !!APIKEY_PROVIDERS[providerId] || authModes.includes("apikey");
   const isFreeNoAuth = !!FREE_PROVIDERS[providerId]?.noAuth;
   const staticModels = getModelsByProviderId(providerId);
-  const models = providerId === "cursor" && liveModels.length > 0
+  const models = LIVE_CATALOG_PROVIDERS.has(providerId) && liveModels.length > 0
     ? liveModels
     : staticModels;
   const providerAlias = getProviderAlias(providerId);
@@ -551,7 +556,7 @@ export default function ProviderDetailPage() {
   // Load the active account's live catalog for the dashboard; the static
   // registry remains the fallback while the request is pending or unavailable.
   useEffect(() => {
-    if (providerId !== "cursor") {
+    if (!LIVE_CATALOG_PROVIDERS.has(providerId)) {
       setLiveModels([]);
       return;
     }
@@ -567,7 +572,12 @@ export default function ProviderDetailPage() {
       .then(async (res) => ({ ok: res.ok, data: await res.json() }))
       .then(({ ok, data }) => {
         if (!cancelled && ok && Array.isArray(data.models) && data.models.length > 0) {
-          setLiveModels(data.models);
+          // Qoder decorates ids with a provider prefix ("qoderwork-cn/kmodel");
+          // the registry and chat router use bare ids. Normalize for display.
+          setLiveModels(data.models.map((m) => ({
+            ...m,
+            id: String(m.id).replace(/^qoder(?:work-cn)?\//, ""),
+          })));
         }
       })
       .catch(() => {});
@@ -651,56 +661,64 @@ export default function ProviderDetailPage() {
     }
   };
 
-  // Fetch Qoder model list and automatically add to available models
-  const handleImportQoderModels = async () => {
-    if (importingQoderModels) return;
+  // One-click model sync for providers with a live upstream catalog.
+  //
+  // Replaces the previous two-button split ("同步模型" refreshed only the chip
+  // list; "获取 Qoder 模型" only persisted). Both hit the same endpoint, so the
+  // difference was an implementation artifact, not a user-facing choice. One
+  // button now does the whole job: fetch → refresh the displayed catalog →
+  // persist so the models survive a page reload.
+  const handleSyncModels = async () => {
+    if (syncingModels) return;
     const activeConnection = connections.find((conn) => conn.isActive !== false);
-    if (!activeConnection) {
-      alert(translate("Please add an active Qoder connection first"));
-      return;
-    }
+    if (!activeConnection?.id) return;
 
-    setImportingQoderModels(true);
+    setSyncingModels(true);
+    setSyncResult(null);
     try {
-      const res = await fetch(`/api/providers/${activeConnection.id}/models`);
+      const res = await fetch(`/api/providers/${activeConnection.id}/models`, { cache: "no-store" });
       const data = await res.json();
       if (!res.ok) {
-        alert(data.error || translate("Failed to fetch models"));
-        return;
-      }
-      const models = data.models || [];
-      if (models.length === 0) {
-        alert(translate("No models returned"));
+        setSyncResult({ error: data.error || translate("Failed to fetch models") });
         return;
       }
 
-      let importedCount = 0;
-      for (const model of models) {
-        const modelId = model.id || model.name;
-        if (!modelId) continue;
+      // Qoder decorates ids with a provider prefix ("qoderwork-cn/kmodel");
+      // the registry and chat router use bare ids. Normalize for both display
+      // and persistence so the two never disagree.
+      const next = (data.models || [])
+        .map((model) => {
+          const rawId = String(model.id || model.name || "");
+          const id = rawId.replace(/^qoder(?:work-cn)?\//, "");
+          return { ...model, id, name: (model.name && String(model.name).trim()) || id };
+        })
+        .filter((model) => model.id);
 
-        // "qoder/auto" or "qoderwork-cn/auto" → bare key
-        const cleanModelId = String(modelId).replace(/^qoder(?:work-cn)?\//, "");
-        // Live catalog display_name (Qwen3.8-Max-Preview, DeepSeek-V4-Pro, ...)
-        const displayName =
-          (model.name && String(model.name).trim()) ||
-          cleanModelId.replace(/^qoder(?:work-cn)?\//, "");
-
-        // Always upsert so re-fetch refreshes human-readable names.
-        await handleAddCustomModel(cleanModelId, "llm", providerStorageAlias, displayName);
-        importedCount += 1;
+      if (next.length === 0) {
+        // API answered but had nothing to give — say so instead of "synced 0".
+        setSyncResult({ count: 0, empty: true });
+        return;
       }
 
-      if (importedCount === 0) {
-        alert(translate("No models returned"));
-      } else {
-        alert(translate("Successfully added") + ` ${importedCount} ` + translate("models"));
+      setLiveModels(next);
+
+      // Persist so the catalog survives a reload. Upsert semantics keep
+      // human-readable names fresh when upstream renames a model.
+      let persisted = 0;
+      for (const model of next) {
+        try {
+          await handleAddCustomModel(model.id, "llm", providerStorageAlias, model.name);
+          persisted += 1;
+        } catch {
+          // Keep going: a single bad row shouldn't abort the whole sync.
+        }
       }
+
+      setSyncResult({ count: next.length, persisted });
     } catch (error) {
-      console.log("Error importing Qoder models:", error);
-      alert(translate("Error fetching models") + ": " + error.message);
+      setSyncResult({ error: error.message });
     } finally {
-      setImportingQoderModels(false);
+      setSyncingModels(false);
     }
   };
 
@@ -1275,17 +1293,28 @@ export default function ProviderDetailPage() {
           Add Model
         </button>
 
-        {/* Import Qoder models button — only show for qoder provider */}
-        {(providerId === "qoder" || providerId === "qoderwork-cn") && connections.some((conn) => conn.isActive !== false) && (
+        {/* One "Sync" button per provider with a live upstream catalog.
+            It fetches, refreshes the displayed chips, and persists — so the
+            old separate "Fetch Qoder Models" import button is gone. */}
+        {LIVE_CATALOG_PROVIDERS.has(providerId) && connections.some((conn) => conn.isActive !== false) && (
           <button
-            onClick={handleImportQoderModels}
-            disabled={importingQoderModels}
+            onClick={handleSyncModels}
+            disabled={syncingModels}
             className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-blue-500/40 px-3 py-2 text-xs text-blue-600 dark:text-blue-400 transition-colors hover:border-blue-500 hover:bg-blue-500/5 sm:w-auto disabled:opacity-50 disabled:cursor-not-allowed"
+            title={syncResult?.error ? String(syncResult.error) : (syncResult?.count != null ? `${syncResult.count} models` : undefined)}
           >
-            <span className="material-symbols-outlined text-sm" style={importingQoderModels ? { animation: "spin 1s linear infinite" } : undefined}>
-              {importingQoderModels ? "progress_activity" : "download"}
+            <span className="material-symbols-outlined text-sm" style={syncingModels ? { animation: "spin 1s linear infinite" } : undefined}>
+              {syncingModels ? "progress_activity" : "sync"}
             </span>
-            {importingQoderModels ? translate("Fetching...") : (providerId === "qoderwork-cn" ? "获取 QoderWork 模型" : translate("Fetch Qoder Models"))}
+            {syncingModels
+              ? translate("Syncing...")
+              : (syncResult?.error
+                  ? `${translate("Sync failed")}: ${syncResult.error}`
+                  : (syncResult?.empty
+                      ? translate("No models returned")
+                      : (syncResult?.count != null
+                          ? `${translate("Synced")} ${syncResult.count}`
+                          : translate("Sync"))))}
           </button>
         )}
 
