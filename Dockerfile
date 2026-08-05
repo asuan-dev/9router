@@ -5,8 +5,12 @@ WORKDIR /app
 
 FROM base AS builder
 ARG NPM_REGISTRY=https://registry.npmjs.org
+ARG ALPINE_MIRROR=https://dl-cdn.alpinelinux.org/alpine
 
-RUN apk --no-cache upgrade && apk --no-cache add python3 make g++ linux-headers
+RUN if [ "${ALPINE_MIRROR}" != "https://dl-cdn.alpinelinux.org/alpine" ]; then \
+    sed -i "s|https://dl-cdn.alpinelinux.org/alpine|${ALPINE_MIRROR}|g" /etc/apk/repositories; \
+  fi && \
+  apk add --no-cache python3 make g++ linux-headers su-exec
 
 COPY package.json ./
 RUN --mount=type=cache,target=/root/.npm \
@@ -47,9 +51,10 @@ RUN mkdir -p /app/data && chown -R node:node /app && \
   mkdir -p /app/data-home && chown node:node /app/data-home && \
   ln -sf /app/data-home /root/.9router 2>/dev/null || true
 
+COPY --from=builder /sbin/su-exec /sbin/su-exec
+
 # Fix permissions at runtime (handles mounted volumes)
-RUN apk --no-cache upgrade && apk --no-cache add su-exec && \
-  printf '#!/bin/sh\nchown -R node:node /app/data /app/data-home 2>/dev/null\nexec su-exec node "$@"\n' > /entrypoint.sh && \
+RUN printf '#!/bin/sh\nchown -R node:node /app/data /app/data-home 2>/dev/null\nexec su-exec node "$@"\n' > /entrypoint.sh && \
   chmod +x /entrypoint.sh
 
 EXPOSE 20128
