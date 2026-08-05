@@ -37,6 +37,40 @@ describe("codebuddy sanitizeChatBody", () => {
     assert.equal(out.thinking, undefined);
   });
 
+  it("keeps multimodal messages and non-empty tools while stripping unknown CN fields", () => {
+    const content = [
+      { type: "text", text: "describe" },
+      { type: "image_url", image_url: { url: "data:image/png;base64,AA==" } },
+    ];
+    const tools = [{ type: "function", function: { name: "lookup", parameters: { type: "object" } } }];
+    const out = sanitizeChatBody({
+      messages: [{ role: "user", content }],
+      tools,
+      unknown_top_level: { keep: false },
+      stream: false,
+    });
+
+    assert.deepEqual(out.messages[0].content, content);
+    assert.deepEqual(out.tools, tools);
+    assert.equal(out.unknown_top_level, undefined);
+    assert.equal(out.stream, true);
+  });
+
+  it("preserves unknown Intl fields when explicitly requested", () => {
+    const body = {
+      messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+      tools: [{ type: "function", function: { name: "lookup" } }],
+      unknown_top_level: { keep: true },
+      stream: false,
+    };
+    const out = sanitizeChatBody(body, { preserveUnknownFields: true });
+
+    assert.deepEqual(out.unknown_top_level, { keep: true });
+    assert.deepEqual(out.messages, body.messages);
+    assert.deepEqual(out.tools, body.tools);
+    assert.equal(out.stream, true);
+  });
+
   it("omits reasoning params on plain chat", () => {
     const out = sanitizeChatBody({
       model: "hy3-preview",
@@ -46,8 +80,8 @@ describe("codebuddy sanitizeChatBody", () => {
     assert.equal(out.reasoning_summary, undefined);
   });
 
-  it("drops none/off effort and never adds summary", () => {
-    for (const effort of ["none", "off", "NONE"]) {
+  it("drops empty, none, and off effort and never adds summary", () => {
+    for (const effort of ["", "  ", "none", "off", "NONE"]) {
       const out = sanitizeChatBody({
         model: "hy3-preview",
         messages: [],
@@ -67,6 +101,17 @@ describe("codebuddy sanitizeChatBody", () => {
     });
     assert.equal(out.reasoning_effort, "medium");
     assert.equal(out.reasoning_summary, "auto");
+  });
+
+  it("preserves an explicit non-empty reasoning_summary", () => {
+    const out = sanitizeChatBody({
+      model: "hy3-preview",
+      messages: [],
+      reasoning_effort: "high",
+      reasoning_summary: "detailed",
+    });
+    assert.equal(out.reasoning_effort, "high");
+    assert.equal(out.reasoning_summary, "detailed");
   });
 
   it("removes empty tools array", () => {

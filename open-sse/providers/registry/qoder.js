@@ -20,8 +20,6 @@ export default {
     baseUrl: "https://api3.qoder.sh/algo/api/v2/service/pro/sse/agent_chat_generation",
     headers: {},
     timeoutMs: 120000,
-    stallTimeoutMs: 120000,
-    protocolProfile: "intl",
     usage: {
       url: "https://openapi.qoder.sh/api/v2/quota/usage",
     },
@@ -54,6 +52,5 @@ export default {
   features: {
     usage: true,
   },
-  // Protocol profile id for open-sse/protocol/qoder (production: intl).
   protocolProfile: "intl",
 };

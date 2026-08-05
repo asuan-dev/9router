@@ -1,30 +1,29 @@
-/**
- * CodeBuddy CN / WorkBuddy — activity provider (daily check-in).
- * Endpoint: copilot.tencent.com "Buddy 加油站"
- */
+/** CodeBuddy CN / WorkBuddy daily check-in adapter. */
 
 import { proxyAwareFetch } from "../../../utils/proxyFetch.js";
+import { PROVIDERS } from "../../../providers/index.js";
 import { extractCodebuddyProfileFromToken } from "../../../../src/shared/utils/codebuddyProfile.js";
 
-const BASE = "https://copilot.tencent.com";
-const STATUS_URL = `${BASE}/v2/billing/meter/checkin-activity-status`;
-const CLAIM_URL = `${BASE}/v2/billing/meter/daily-checkin`;
+const PROVIDER_ID = "codebuddy-cn";
 
 const CHECKIN_ALREADY_CODE = 10001;
 
-function buildHeaders(token, uid) {
+function buildHeaders(config, token, uid) {
   const headers = {
-    "Content-Type": "application/json",
+    ...(config?.headers || {}),
     Authorization: `Bearer ${token}`,
   };
   if (uid) headers["X-User-Id"] = String(uid);
   return headers;
 }
 
-async function postJson(url, token, uid, proxyOptions) {
+async function postJson(endpointKey, token, uid, proxyOptions) {
+  const config = PROVIDERS[PROVIDER_ID]?.activity;
+  const url = config?.[endpointKey];
+  if (!url) throw new Error("CodeBuddy CN activity endpoint not configured");
   const response = await proxyAwareFetch(
     url,
-    { method: "POST", headers: buildHeaders(token, uid), body: "{}" },
+    { method: "POST", headers: buildHeaders(config, token, uid), body: "{}" },
     proxyOptions,
   );
   let body = null;
@@ -40,7 +39,7 @@ function resolveUid(conn) {
 }
 
 export const codebuddyCnProvider = {
-  providerId: "codebuddy-cn",
+  providerId: PROVIDER_ID,
   timezone: "Asia/Shanghai",
 
   checkin: {
@@ -58,7 +57,7 @@ export const codebuddyCnProvider = {
       const auth = this.resolveAuth(conn);
       if (!auth) return { done: false, ok: false, message: "missing token or uid" };
       try {
-        const { status, body } = await postJson(STATUS_URL, auth.token, auth.meta.uid, proxyOptions);
+        const { status, body } = await postJson("statusUrl", auth.token, auth.meta.uid, proxyOptions);
         if (status === 401 || status === 403) {
           return { done: false, ok: false, message: body?.msg || "auth failed" };
         }
@@ -82,7 +81,7 @@ export const codebuddyCnProvider = {
       const auth = this.resolveAuth(conn);
       if (!auth) return { ok: false, message: "missing token or uid" };
       try {
-        const { status, body } = await postJson(CLAIM_URL, auth.token, auth.meta.uid, proxyOptions);
+        const { status, body } = await postJson("claimUrl", auth.token, auth.meta.uid, proxyOptions);
         if (body?.code === CHECKIN_ALREADY_CODE) {
           return { ok: true, already: true, message: body?.msg || "已签到", credits: null };
         }

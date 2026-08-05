@@ -150,6 +150,8 @@ export default function ProviderDetailPage() {
   const isOAuth = !!OAUTH_PROVIDERS[providerId] || !!FREE_PROVIDERS[providerId] || authModes.includes("oauth");
   const supportsApiKeyAuth = !!APIKEY_PROVIDERS[providerId] || authModes.includes("apikey");
   const isFreeNoAuth = !!FREE_PROVIDERS[providerId]?.noAuth;
+  const supportsCheckin = providerInfo?.features?.checkin === true;
+  const supportsProfileRefresh = providerInfo?.features?.profileRefresh === true;
   const staticModels = getModelsByProviderId(providerId);
   const models = LIVE_CATALOG_PROVIDERS.has(providerId) && liveModels.length > 0
     ? liveModels
@@ -485,7 +487,7 @@ export default function ProviderDetailPage() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        console.log("Error refreshing profile:", data?.error || res.status);
+        console.warn("Profile refresh request failed");
         return;
       }
       if (data.connection) {
@@ -495,13 +497,13 @@ export default function ProviderDetailPage() {
       } else {
         await fetchConnections();
       }
-    } catch (error) {
-      console.log("Error refreshing profile:", error);
+    } catch {
+      console.warn("Profile refresh request failed");
     }
   };
 
   const handleRefreshAllProfiles = async () => {
-    if ((providerId !== "codebuddy-cn" && providerId !== "qoderwork-cn") || refreshingAllProfiles) return;
+    if (!supportsProfileRefresh || refreshingAllProfiles) return;
     const targets = connections.filter((c) => c.authType === "oauth");
     if (targets.length === 0) return;
     setRefreshingAllProfiles(true);
@@ -1113,7 +1115,7 @@ export default function ProviderDetailPage() {
                     ),
                   );
                 }}
-                hasActivities={["codebuddy-cn", "qoderwork-cn"].includes(providerId)}
+                hasActivities={supportsCheckin}
               />
             </div>
           </div>
@@ -1603,7 +1605,7 @@ export default function ProviderDetailPage() {
               )}
               
 
-              {(providerId === "codebuddy-cn" || providerId === "qoderwork-cn") && connections.some((c) => c.authType === "oauth") && (
+              {supportsProfileRefresh && connections.some((c) => c.authType === "oauth") && (
                 <Button
                   size="sm"
                   variant="secondary"
@@ -1614,7 +1616,7 @@ export default function ProviderDetailPage() {
                   {refreshingAllProfiles ? "刷新中..." : "全部刷新"}
                 </Button>
               )}
-              {(providerId === "codebuddy-cn" || providerId === "qoderwork-cn") && connections.some((c) => c.authType === "oauth") && (
+              {supportsCheckin && connections.some((c) => c.authType === "oauth") && (
                 <div className="flex items-center gap-1.5">
                   <span className="text-xs text-text-muted font-medium">自动签到</span>
                   <Toggle

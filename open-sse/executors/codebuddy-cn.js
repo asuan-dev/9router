@@ -36,4 +36,3 @@ export class CodeBuddyExecutor extends DefaultExecutor {
   }
 }
 
-export default CodeBuddyExecutor;

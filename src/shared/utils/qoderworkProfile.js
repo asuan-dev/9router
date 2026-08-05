@@ -5,6 +5,16 @@
  */
 
 import { maskMiddle4, looksLikePhone } from "./codebuddyProfile.js";
+/**
+ * Merge profile fields into provider-specific data without accepting a newly
+ * fetched raw phone number. A historical phone already present on a connection
+ * is left untouched for backward compatibility and remains response-filtered.
+ */
+export function mergePersistedProfileData(existing, patch) {
+  const safePatch = { ...(patch || {}) };
+  delete safePatch.phone;
+  return { ...(existing || {}), ...safePatch };
+}
 
 /**
  * @param {object|null|undefined} userinfo - GET openapi /api/v1/userinfo body
@@ -117,47 +127,3 @@ export function mapQoderworkCheckinStatus(statusBody, shanghaiDayKey) {
   };
 }
 
-/**
- * After a successful claim response.
- * @param {object|null|undefined} claimBody
- * @param {string} shanghaiDayKey
- */
-export function mapQoderworkCheckinClaim(claimBody, shanghaiDayKey) {
-  if (!claimBody || typeof claimBody !== "object") {
-    return mapQoderworkCheckinStatus({ status: "CLAIMED_TODAY" }, shanghaiDayKey);
-  }
-  // If upstream says already claimed, treat as already
-  const status = String(claimBody.status || "").toUpperCase();
-  if (status.includes("ALREADY") || claimBody.already === true) {
-    return mapQoderworkCheckinStatus(
-      { ...claimBody, status: "CLAIMED_TODAY" },
-      shanghaiDayKey,
-    );
-  }
-  return {
-    autoCheckinLastResult: "success",
-    autoCheckinLastMessage:
-      claimBody.message ||
-      (claimBody.rewardCredits != null
-        ? `签到成功 +${claimBody.rewardCredits}`
-        : "签到成功"),
-    autoCheckinDoneDay: shanghaiDayKey,
-    autoCheckinLastAt: new Date().toISOString(),
-    autoCheckinLastCredit:
-      claimBody.rewardCredits ?? claimBody.credit ?? claimBody.data?.credit ?? null,
-    autoCheckinStreakDays:
-      claimBody.currentStreakDays ??
-      claimBody.streakDays ??
-      claimBody.data?.streak_days ??
-      null,
-  };
-}
-
-export function shanghaiDayKey(date = new Date()) {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Shanghai",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(date);
-}

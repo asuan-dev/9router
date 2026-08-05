@@ -4,8 +4,9 @@ import { extractCodebuddyProfileFromToken } from "@/shared/utils/codebuddyProfil
 import {
   extractQoderworkProfileFromUserinfo,
   mapQoderworkCheckinStatus,
-  shanghaiDayKey,
+  mergePersistedProfileData,
 } from "@/shared/utils/qoderworkProfile";
+import { dayKeyInTimeZone } from "@/shared/utils/timezone";
 import { getQoderworkCheckinStatus } from "open-sse/services/activities/providers/qoderwork-cn.js";
 
 export const dynamic = "force-dynamic";
@@ -44,14 +45,14 @@ export async function POST(_request, { params }) {
         );
       }
       const updateData = {
-        providerSpecificData: { ...(existing.providerSpecificData || {}) },
+        providerSpecificData: mergePersistedProfileData(
+          existing.providerSpecificData,
+          {
+            ...(profile.phoneMasked ? { phoneMasked: profile.phoneMasked } : {}),
+          },
+        ),
       };
       if (profile.nickname) updateData.name = profile.nickname;
-      if (profile.phoneMasked) {
-        updateData.providerSpecificData.phoneMasked = profile.phoneMasked;
-        // store full phone only server-side; list API strips it
-        if (profile.phone) updateData.providerSpecificData.phone = profile.phone;
-      }
       if (profile.sub) updateData.providerSpecificData.uid = profile.sub;
       const updated = await updateProviderConnection(id, updateData);
       if (!updated) {
@@ -95,7 +96,7 @@ export async function POST(_request, { params }) {
         };
       }
       const profile = extractQoderworkProfileFromUserinfo(full);
-      const dayKey = shanghaiDayKey();
+      const dayKey = dayKeyInTimeZone("Asia/Shanghai");
       const checkin = await getQoderworkCheckinStatus(accessToken, null);
       const checkinFields =
         checkin?.ok && checkin.data
@@ -105,18 +106,17 @@ export async function POST(_request, { params }) {
             : {};
 
       const updateData = {
-        providerSpecificData: {
-          ...(existing.providerSpecificData || {}),
-          ...checkinFields,
-        },
+        providerSpecificData: mergePersistedProfileData(
+          existing.providerSpecificData,
+          {
+            ...checkinFields,
+            ...(profile.phoneMasked ? { phoneMasked: profile.phoneMasked } : {}),
+          },
+        ),
       };
       if (profile.displayName) {
         updateData.name = profile.displayName;
         updateData.displayName = profile.displayName;
-      }
-      if (profile.phoneMasked) {
-        updateData.providerSpecificData.phoneMasked = profile.phoneMasked;
-        if (profile.phone) updateData.providerSpecificData.phone = profile.phone;
       }
       if (profile.loginSource) {
         updateData.providerSpecificData.loginSource = profile.loginSource;
@@ -149,10 +149,10 @@ export async function POST(_request, { params }) {
       { error: `Profile refresh not supported for provider ${existing.provider}` },
       { status: 400 },
     );
-  } catch (error) {
-    console.log("Error refreshing profile:", error);
+  } catch {
+    console.error("Profile refresh failed");
     return NextResponse.json(
-      { error: error.message || "Failed to refresh profile" },
+      { error: "Failed to refresh profile" },
       { status: 500 },
     );
   }

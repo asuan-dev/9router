@@ -2,8 +2,6 @@
  * Qoder API constants (intl defaults).
  *
  * Hosts live on Profile for multi-region; these feed INTL_PROFILE.
- * Evidence: lab/qodercli/SOURCES.md + PROTOCOL-SCHEMA.md
- *
  * Model ids come from live /model/list (or registry UI), not a frozen map.
  */
 
@@ -36,7 +34,13 @@ export const QODER_IDE_VERSION = "1.0.0";
 export const QODER_CLIENT_TYPE = "5";
 export const QODER_DATA_POLICY = "disagree";
 export const QODER_LOGIN_VERSION = "v2";
-export const QODER_MACHINE_OS = `${process.arch === "arm64" ? "aarch64" : process.arch === "x64" ? "x86_64" : process.arch}_darwin`;
+export function normalizeQoderMachineOs(arch = process.arch, platform = process.platform) {
+  const normalizedArch = arch === "arm64" ? "aarch64" : arch === "x64" ? "x86_64" : arch;
+  const normalizedPlatform = platform === "win32" ? "windows" : platform;
+  return `${normalizedArch}_${normalizedPlatform}`;
+}
+
+export const QODER_MACHINE_OS = normalizeQoderMachineOs();
 export const QODER_MACHINE_TYPE = "5";
 
 // RSA public key for COSY (same across IDE / CN / CLIProxy family).

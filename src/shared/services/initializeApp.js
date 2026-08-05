@@ -18,6 +18,7 @@ import { syncToJson as syncMitmAliasCache } from "@/lib/mitmAliasCache";
 import { killAllBridges } from "@/lib/mcp/stdioSseBridge";
 import { getAllDiscoveredCatalogs } from "@/lib/db/repos/discoveredModelsRepo";
 import { setLiveCapabilities } from "open-sse/providers/liveCapabilities.js";
+import { dbg } from "open-sse/utils/debugLog.js";
 
 // Inject correct paths and DB hooks into manager.js (CJS) from ESM context
 (function bootstrapMitm() {
@@ -134,9 +135,9 @@ async function runHeavyStartup() {
         setLiveCapabilities(provider, catalog.caps, { fetchedAt: catalog.fetchedAt, source: "boot-rehydrate" });
       }
     }
-    console.log(`[InitApp] Re-hydrated live capabilities for ${Object.keys(all).length} provider(s)`);
+    dbg("InitApp", `Rehydrated live capabilities for ${Object.keys(all).length} provider(s)`);
   } catch (e) {
-    console.log("[InitApp] Live capability re-hydration failed:", e?.message);
+    console.warn("[InitApp] Live capability rehydration failed:", e?.message);
   }
 }
 

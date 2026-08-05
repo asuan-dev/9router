@@ -35,9 +35,7 @@ import {
  * @property {string} modelListUrl
  * @property {string} quotaUrl
  * @property {string} deviceTokenUrl
- * @property {string} [quotaUserAgent] - User-Agent the quota endpoint
- *   requires (CN returns 401 without it; intl has no such constraint).
- *   Evidence: lab/qoderwork-cn/references/api-inventory-0.6.7.md#L25
+ * @property {string} [quotaUserAgent] - User-Agent required by quota requests
  * @property {string} userInfoUrl
  * @property {string} jobTokenExchangeUrl - PAT (`pt-...`) → short-lived job
  *   token exchange; plain JSON POST, not cosy-signed.
@@ -45,6 +43,7 @@ import {
  * @property {string} [refreshTokenUrl]
  * @property {string} [deviceClientId] - OAuth device client_id (CN requires it)
  * @property {string} [deviceRedirectUri]
+ * @property {{statusUrl: string, claimUrl: string, userAgent: string}} [checkin]
  * @property {string} sessionType
  * @property {string} businessProduct
  * @property {string} businessVersion
@@ -58,7 +57,7 @@ import {
  * @property {string} machineType
  */
 
-/** Device-token refresh lives on openapi (not center). See wire-profile-cn.md / G10. */
+/** Device-token refresh lives on openapi (not center). */
 const INTL_DEVICE_REFRESH_URL = `${QODER_OPENAPI_BASE}/api/v1/deviceToken/refresh`;
 
 /** @type {QoderProfile} */
@@ -75,9 +74,7 @@ export const INTL_PROFILE = {
   jobTokenExchangeUrl: QODER_JOB_TOKEN_EXCHANGE_URL,
   loginUrl: QODER_LOGIN_URL,
   refreshTokenUrl: INTL_DEVICE_REFRESH_URL,
-  // CLI (qodercli) sends client_id on the login URL for intl too — without it
-  // the server treats the registration as "dashboard.email_pwd" instead of a
-  // CLI/IDE login, which blocks activity-claim eligibility.
+  // The CLI sends client_id so login is registered as a CLI/IDE session.
   deviceClientId: "e883ade2-e6e3-4d6d-adf7-f92ceff5fdcb",
   sessionType: "qodercli",
   businessProduct: "cli",
@@ -104,8 +101,7 @@ export const CN_WORK_PROFILE = {
   openApiBase: CN_OPENAPI,
   chatBase: CN_GATEWAY,
   centerBase: CN_GATEWAY,
-  // openapi.qoder.com.cn rejects quota requests without this UA (401 even with
-  // a valid token). Intl has no such constraint. See api-inventory-0.6.7.md#L25.
+  // CN quota and check-in endpoints require the desktop product identity.
   quotaUserAgent: "QoderWork",
   chatUrl: CN_CHAT_URL,
   modelListUrl: `${CN_GATEWAY}/algo/api/v2/model/list?Encode=1`,
@@ -115,6 +111,11 @@ export const CN_WORK_PROFILE = {
   jobTokenExchangeUrl: `${CN_OPENAPI}/api/v1/jobToken/exchange`,
   loginUrl: "https://qoder.com.cn/device/selectAccounts",
   refreshTokenUrl: `${CN_OPENAPI}/api/v1/deviceToken/refresh`,
+  checkin: {
+    statusUrl: `${CN_OPENAPI}/sash/api/v1/me/daily-check-in/status`,
+    claimUrl: `${CN_OPENAPI}/sash/api/v1/me/daily-check-in/claim`,
+    userAgent: "QoderWork",
+  },
   deviceClientId: "1c5e33e1-364d-4ce6-b02c-acaa81274a5c",
   deviceRedirectUri: "qoder-work-cn://",
   sessionType: "qoder_work",
@@ -131,15 +132,12 @@ export const CN_WORK_PROFILE = {
 };
 
 /** @type {QoderProfile} */
-export const DEFAULT_PROFILE = INTL_PROFILE;
+const DEFAULT_PROFILE = INTL_PROFILE;
 
 /** @type {Record<string, QoderProfile>} */
-export const PROFILES = {
+const PROFILES = {
   intl: INTL_PROFILE,
   "cn-work": CN_WORK_PROFILE,
-  // Provider id alias → same profile
-  "qoderwork-cn": CN_WORK_PROFILE,
-  qoder: INTL_PROFILE,
 };
 
 /**

@@ -18,11 +18,7 @@ export class QoderExecutor extends BaseExecutor {
 
   /** @returns {string} profile id for protocol.resolveProfile */
   getProtocolProfile() {
-    return (
-      this.config?.protocolProfile ||
-      this.config?.protocol?.profile ||
-      (this.provider === "qoderwork-cn" ? "cn-work" : "intl")
-    );
+    return this.config.protocolProfile;
   }
 
   buildUrl() {
@@ -57,4 +53,3 @@ export class QoderExecutor extends BaseExecutor {
   }
 }
 
-export default QoderExecutor;

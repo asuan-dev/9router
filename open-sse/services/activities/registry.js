@@ -39,8 +39,3 @@ export function getCheckinProviderIds() {
     .filter((p) => p.checkin)
     .map((p) => p.providerId);
 }
-
-/** All registered providers. */
-export function getAllActivityProviders() {
-  return [...REGISTRY.values()];
-}

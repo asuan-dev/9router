@@ -12,9 +12,8 @@ const qoderworkCn = {
   flowType: "device_code",
   requestDeviceCode: async (config) => {
     const { QoderService } = await import("@/lib/oauth/services/qoder");
-    // Must be awaited — initiateDeviceFlow resolves a hardware UMID.
     const flow = await new QoderService({
-      profile: config.protocolProfile || "cn-work",
+      profile: config.protocolProfile,
     }).initiateDeviceFlow();
     return {
       device_code: flow.nonce,
@@ -27,11 +26,12 @@ const qoderworkCn = {
       codeVerifier: flow.codeVerifier,
       _qoderNonce: flow.nonce,
       _qoderMachineId: flow.machineId,
+      _qoderMachineToken: flow.machineToken,
     };
   },
   pollToken: async (config, deviceCode, codeVerifier, extraData) => {
     const { QoderService } = await import("@/lib/oauth/services/qoder");
-    const svc = new QoderService({ profile: config.protocolProfile || "cn-work" });
+    const svc = new QoderService({ profile: config.protocolProfile });
     const nonce = deviceCode || extraData?._qoderNonce;
     const verifier = codeVerifier || extraData?._qoderVerifier;
     if (!nonce || !verifier) {
@@ -66,6 +66,7 @@ const qoderworkCn = {
         expires_in: expiresIn,
         _qoderUserId: result.userId,
         _qoderMachineId: extraData?._qoderMachineId || "",
+        _qoderMachineToken: extraData?._qoderMachineToken || extraData?._qoderMachineId || "",
         _qoderName: userInfo.name,
         _qoderEmail: userInfo.email,
         _qoderOrganizationId: userInfo.organizationId,
@@ -89,6 +90,7 @@ const qoderworkCn = {
         authMethod: "device",
         userId,
         machineId: tokens._qoderMachineId || "",
+        machineToken: tokens._qoderMachineToken || tokens._qoderMachineId || "",
         organizationId: tokens._qoderOrganizationId || "",
       },
     };

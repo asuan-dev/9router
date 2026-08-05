@@ -2,9 +2,9 @@ import { describe, it, expect } from "vitest";
 import {
   extractQoderworkProfileFromUserinfo,
   mapQoderworkCheckinStatus,
-  mapQoderworkCheckinClaim,
-  shanghaiDayKey,
+  mergePersistedProfileData,
 } from "../../src/shared/utils/qoderworkProfile.js";
+import { dayKeyInTimeZone } from "../../src/shared/utils/timezone.js";
 
 describe("qoderworkProfile", () => {
   it("extracts display name and login source; no phone when not phone-like", () => {
@@ -25,7 +25,7 @@ describe("qoderworkProfile", () => {
   });
 
   it("maps CLAIMED_TODAY to already badge fields", () => {
-    const day = shanghaiDayKey();
+    const day = dayKeyInTimeZone("Asia/Shanghai");
     const m = mapQoderworkCheckinStatus(
       { status: "CLAIMED_TODAY", rewardCredits: 100, currentStreakDays: 3 },
       day,
@@ -35,10 +35,30 @@ describe("qoderworkProfile", () => {
     expect(m.autoCheckinLastCredit).toBe(100);
   });
 
-  it("maps claim success", () => {
-    const day = shanghaiDayKey();
-    const m = mapQoderworkCheckinClaim({ rewardCredits: 50 }, day);
-    expect(m.autoCheckinLastResult).toBe("success");
-    expect(m.autoCheckinDoneDay).toBe(day);
+  it("derives calendar days in the requested timezone", () => {
+    const instant = new Date("2026-01-01T16:30:00.000Z");
+    expect(dayKeyInTimeZone("Asia/Shanghai", instant)).toBe("2026-01-02");
+    expect(dayKeyInTimeZone("UTC", instant)).toBe("2026-01-01");
+  });
+
+  it("omits newly fetched raw phone from persisted profile data", () => {
+    const persisted = mergePersistedProfileData(
+      { loginSource: "existing" },
+      { phone: "13812345678", phoneMasked: "138****5678", userId: "u1" },
+    );
+    expect(persisted).toEqual({
+      loginSource: "existing",
+      phoneMasked: "138****5678",
+      userId: "u1",
+    });
+  });
+
+  it("preserves a historical raw phone without replacing it", () => {
+    const persisted = mergePersistedProfileData(
+      { phone: "historical" },
+      { phone: "new-raw", phoneMasked: "new****mask" },
+    );
+    expect(persisted.phone).toBe("historical");
+    expect(persisted.phoneMasked).toBe("new****mask");
   });
 });

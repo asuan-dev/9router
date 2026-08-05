@@ -1,19 +1,18 @@
 /**
- * QoderWork CN — activity provider (daily check-in).
- * Endpoint: openapi.qoder.com.cn /sash/api/v1/me/daily-check-in/*
+ * QoderWork CN activity provider (daily check-in).
  */
 
 import { proxyAwareFetch } from "../../../utils/proxyFetch.js";
 import { CN_WORK_PROFILE } from "../../../protocol/qoder/profile.js";
 
-const SASH = `${CN_WORK_PROFILE.openApiBase}/sash/api/v1/me`;
-const STATUS_URL = `${SASH}/daily-check-in/status`;
-const CLAIM_URL = `${SASH}/daily-check-in/claim`;
+const { statusUrl: STATUS_URL, claimUrl: CLAIM_URL, userAgent: CHECKIN_USER_AGENT } =
+  CN_WORK_PROFILE.checkin;
 
 function buildHeaders(token) {
   return {
     "Content-Type": "application/json",
     Authorization: `Bearer ${token}`,
+    "User-Agent": CHECKIN_USER_AGENT,
   };
 }
 

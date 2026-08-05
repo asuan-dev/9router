@@ -1,26 +1,25 @@
 import {
   resolveProfile,
 } from "../../../../open-sse/protocol/qoder/index.js";
+import { proxyAwareFetch } from "../../../../open-sse/utils/proxyFetch.js";
 import crypto from "crypto";
 
-// Per-UUID UMID from runtime-info binary (macOS only); falls back to null off-platform.
 let _umidModule = null;
-async function loadUmidModule() {
-  if (_umidModule) return _umidModule;
-  try {
-    _umidModule = await import("../../../../open-sse/protocol/qoder/umid.js");
-    return _umidModule;
-  } catch {
-    _umidModule = { getUmidForUuid: async () => null, getUmidInfo: async () => null };
-    return _umidModule;
+async function resolveMachineToken(machineId) {
+  if (!_umidModule) {
+    try {
+      _umidModule = await import("../../../../open-sse/protocol/qoder/umid.js");
+    } catch {
+      _umidModule = { getUmidForUuid: async () => null };
+    }
   }
+  const info = await _umidModule.getUmidForUuid(machineId);
+  return info?.machineToken || machineId;
 }
 
 /**
  * Qoder OAuth Service — device-token flow + openapi deviceToken refresh.
  * URLs from protocol Profile (intl | cn-work). Protocol chat stays separate.
- *
- * CN evidence: lab/qoderwork-cn/references/wire-profile-cn.md
  */
 
 const FETCH_TIMEOUT_MS = 15_000;
@@ -33,11 +32,11 @@ function base64Url(buf) {
     .replace(/\//g, "_");
 }
 
-async function fetchWithTimeout(url, init = {}) {
+async function fetchWithTimeout(fetchImpl, url, init = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort("timeout"), FETCH_TIMEOUT_MS);
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    return await fetchImpl(url, { ...init, signal: controller.signal }, null);
   } finally {
     clearTimeout(timer);
   }
@@ -45,10 +44,12 @@ async function fetchWithTimeout(url, init = {}) {
 
 export class QoderService {
   /**
-   * @param {{ profile?: string | object | null }} [options]
+   * @param {{ profile?: string | object | null, machineTokenResolver?: (machineId: string) => Promise<string>, fetchImpl?: typeof proxyAwareFetch }} [options]
    */
   constructor(options = {}) {
     this.profile = resolveProfile(options.profile ?? null);
+    this.machineTokenResolver = options.machineTokenResolver || resolveMachineToken;
+    this.fetchImpl = options.fetchImpl || proxyAwareFetch;
   }
 
   generatePkcePair() {
@@ -65,29 +66,15 @@ export class QoderService {
   }
 
   /**
-   * Initiate the device flow.
-   * CN requires client_id + redirect_uri on the login URL.
-   *
-   * machine_id: the official Qoder IDE sends `runtime-info`'s 88-char UMID
-   * (P1gA...) as machine_id — not a random UUID. The server binds this to
-   * the account at login time; subsequent activity-claim endpoints reject
-   * requests whose Cosy-MachineToken doesn't match the registered machine_id.
-   *
-   * We generate a random UUID, feed it through `getUmidForUuid()` so the
-   * official SecurityGuard algorithm produces a unique 88-char UMID per
-   * account. On platforms without the binary (Linux/Docker) we fall back
-   * to the raw UUID (legacy behaviour).
+   * Initiate the device flow with a raw UUID machine id and a separately
+   * derived SecurityGuard machine token. The token falls back to the UUID
+   * when the optional runtime-info integration is unavailable.
    */
   async initiateDeviceFlow() {
     const { verifier, challenge } = this.generatePkcePair();
     const nonce = crypto.randomUUID();
-    const rawUuid = crypto.randomUUID();
-
-    // CLI sends the raw UUID as machine_id in the login URL (NOT the UMID).
-    // The UMID is generated later by runtime-info and sent as Cosy-MachineToken
-    // in API requests. We replicate this: login URL gets the UUID, cosyLight()
-    // regenerates the UMID from it via getUmidForUuid().
-    const machineId = rawUuid;
+    const machineId = crypto.randomUUID();
+    const machineToken = (await this.machineTokenResolver(machineId)) || machineId;
 
     // Param order/names match desktop startDeviceFlow (selectAccounts).
     const params = new URLSearchParams();
@@ -113,6 +100,7 @@ export class QoderService {
       codeVerifier: verifier,
       nonce,
       machineId,
+      machineToken,
     };
   }
 
@@ -125,7 +113,7 @@ export class QoderService {
     }
     const url = `${this.profile.deviceTokenUrl}?nonce=${encodeURIComponent(nonce)}&verifier=${encodeURIComponent(codeVerifier)}&challenge_method=S256`;
 
-    const response = await fetchWithTimeout(url, {
+    const response = await fetchWithTimeout(this.fetchImpl, url, {
       method: "GET",
       headers: {
         Accept: "application/json",
@@ -175,7 +163,7 @@ export class QoderService {
 
   async fetchUserInfo(accessToken) {
     try {
-      const response = await fetchWithTimeout(this.profile.userInfoUrl, {
+      const response = await fetchWithTimeout(this.fetchImpl, this.profile.userInfoUrl, {
         method: "GET",
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -211,7 +199,7 @@ export class QoderService {
       throw new Error("refreshDeviceToken: profile has no refreshTokenUrl");
     }
 
-    const response = await fetchWithTimeout(url, {
+    const response = await fetchWithTimeout(this.fetchImpl, url, {
       method: "POST",
       headers: {
         Accept: "application/json",

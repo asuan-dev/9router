@@ -61,6 +61,7 @@ export async function chat({
           // acts as fallback when userinfo was unavailable.
           userId: resolved.userId || credentials?.providerSpecificData?.userId || "",
           machineId: credentials?.providerSpecificData?.machineId || "",
+          machineToken: credentials?.providerSpecificData?.machineToken || "",
         },
       };
     } catch (err) {
@@ -127,6 +128,7 @@ export async function chat({
         name: credentials.displayName || "",
         email: credentials.email || "",
         machineId: psd.machineId || "",
+        machineToken: psd.machineToken || psd.machineId || "",
       },
       p,
     );

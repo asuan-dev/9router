@@ -9,8 +9,14 @@
  *   - device flow URL construction
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import crypto from "crypto";
+
+const { refreshFetchMock } = vi.hoisted(() => ({ refreshFetchMock: vi.fn() }));
+
+vi.mock("../../open-sse/utils/proxyFetch.js", () => ({
+  proxyAwareFetch: (...args) => refreshFetchMock(...args),
+}));
 
 import {
   qoderEncodeBody,
@@ -23,6 +29,7 @@ import {
   QODER_CHAT_URL_ENCODED,
   QODER_MODEL_LIST_URL,
 } from "../../open-sse/protocol/qoder/test-utils.js";
+import { normalizeQoderMachineOs, QODER_MACHINE_OS } from "../../open-sse/protocol/qoder/constants.js";
 import { QoderService } from "../../src/lib/oauth/services/qoder.js";
 import {
   INTL_PROFILE,
@@ -36,12 +43,16 @@ import { applyThinking } from "../../open-sse/translator/concerns/thinkingUnifie
 import { refreshQoderDeviceToken } from "../../open-sse/services/tokenRefresh/providers.js";
 import { QoderExecutor } from "../../open-sse/executors/qoder.js";
 import { PROVIDER_MODELS } from "../../open-sse/config/providerModels.js";
+import { PROVIDERS, PROVIDER_OAUTH } from "../../open-sse/providers/index.js";
+import qoderOAuth from "../../src/lib/oauth/providers/qoder.js";
+import qoderworkCnOAuth from "../../src/lib/oauth/providers/qoderwork-cn.js";
 
 // Convenience aliases — tests were originally written against module-level
 // helpers; the QoderService class wraps them so each test creates its own
 // instance to avoid hidden state.
 const generatePkcePair = () => new QoderService().generatePkcePair();
-const initiateDeviceFlow = async () => new QoderService().initiateDeviceFlow();
+const initiateDeviceFlow = async () =>
+  new QoderService({ machineTokenResolver: async (machineId) => machineId }).initiateDeviceFlow();
 const parseExpiry = QoderService.parseExpiry;
 
 describe("provider catalog", () => {
@@ -149,14 +160,23 @@ describe("initiateDeviceFlow", () => {
     expect(flow.verificationUriComplete).toMatch(/machine_id=[^&]+/);
   });
 
-  it("returns nonce as UUID and machineId as UUID-or-UMID", async () => {
-    const flow = await initiateDeviceFlow();
+  it("returns raw UUID machineId and a separately resolved machineToken", async () => {
+    const resolver = vi.fn(async () => "umid-token");
+    const flow = await new QoderService({ machineTokenResolver: resolver }).initiateDeviceFlow();
     const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
     expect(flow.nonce).toMatch(uuidRe);
-    // machineId is a real UMID (88-char P1gA...) when runtime-info binary is
-    // available, or a random UUID fallback on platforms without it.
-    expect(typeof flow.machineId).toBe("string");
-    expect(flow.machineId.length).toBeGreaterThanOrEqual(36);
+    expect(flow.machineId).toMatch(uuidRe);
+    expect(flow.machineToken).toBe("umid-token");
+    expect(resolver).toHaveBeenCalledOnce();
+    expect(resolver).toHaveBeenCalledWith(flow.machineId);
+    expect(new URL(flow.verificationUriComplete).searchParams.get("machine_id")).toBe(flow.machineId);
+  });
+
+  it("falls machineToken back to the raw UUID", async () => {
+    const flow = await new QoderService({
+      machineTokenResolver: async () => "",
+    }).initiateDeviceFlow();
+    expect(flow.machineToken).toBe(flow.machineId);
   });
 });
 
@@ -252,6 +272,20 @@ describe("buildCosyHeaders", () => {
     const headers = buildCosyHeaders(Buffer.alloc(0), QODER_MODEL_LIST_URL, creds);
     expect(headers["Cosy-Machineid"]).toBe("fixed-machine-id");
     expect(headers["Cosy-Machinetoken"]).toBe("fixed-machine-id");
+  });
+
+  it("keeps machineId and machineToken distinct when both are supplied", () => {
+    const headers = buildCosyHeaders(Buffer.alloc(0), QODER_MODEL_LIST_URL, {
+      ...creds,
+      machineToken: "umid-token",
+    });
+    expect(headers["Cosy-Machineid"]).toBe("fixed-machine-id");
+    expect(headers["Cosy-Machinetoken"]).toBe("umid-token");
+  });
+
+  it("falls Cosy-Machinetoken back to machineId for legacy rows", () => {
+    const headers = buildCosyHeaders(Buffer.alloc(0), QODER_MODEL_LIST_URL, creds);
+    expect(headers["Cosy-Machinetoken"]).toBe(headers["Cosy-Machineid"]);
   });
 
   it("auto-generates a machineId when none is supplied", () => {
@@ -585,17 +619,44 @@ describe("wrapQoderSSE", () => {
   });
 });
 
+describe("machine OS normalization", () => {
+  it("uses the current runtime platform", () => {
+    expect(QODER_MACHINE_OS).toBe(normalizeQoderMachineOs(process.arch, process.platform));
+  });
+
+  it.each([
+    ["arm64", "darwin", "aarch64_darwin"],
+    ["x64", "linux", "x86_64_linux"],
+    ["x64", "win32", "x86_64_windows"],
+  ])("maps %s/%s to protocol spelling %s", (arch, platform, expected) => {
+    expect(normalizeQoderMachineOs(arch, platform)).toBe(expected);
+  });
+});
+
 describe("protocol profile", () => {
   it("defaults null to intl", () => {
     expect(resolveProfile(null).id).toBe("intl");
     expect(resolveProfile(undefined).chatUrl).toBe(INTL_PROFILE.chatUrl);
   });
 
-  it("resolves cn-work and qoderwork-cn aliases", () => {
+  it("resolves canonical protocol profile ids", () => {
     expect(resolveProfile("cn-work").id).toBe("cn-work");
-    expect(resolveProfile("qoderwork-cn").chatUrl).toBe(CN_WORK_PROFILE.chatUrl);
     expect(CN_WORK_PROFILE.refreshTokenUrl).toContain("openapi.qoder.com.cn");
     expect(CN_WORK_PROFILE.deviceClientId).toBeTruthy();
+  });
+
+  it("projects the registry protocolProfile into transport and OAuth views", () => {
+    expect(PROVIDERS.qoder.protocolProfile).toBe("intl");
+    expect(PROVIDER_OAUTH.qoder.protocolProfile).toBe("intl");
+    expect(PROVIDERS["qoderwork-cn"].protocolProfile).toBe("cn-work");
+    expect(PROVIDER_OAUTH["qoderwork-cn"].protocolProfile).toBe("cn-work");
+  });
+
+  it("keeps connection timeout without a provider stall override", () => {
+    for (const id of ["qoder", "qoderwork-cn"]) {
+      expect(PROVIDERS[id].timeoutMs).toBe(120_000);
+      expect(PROVIDERS[id].stallTimeoutMs).toBeUndefined();
+    }
   });
 
   it("throws on unknown profile id (no silent intl fallback)", () => {
@@ -672,14 +733,14 @@ describe("profile-driven payload + cosy (simulation)", () => {
       loginUrl: "https://example.test/device/selectAccounts",
       deviceTokenUrl: "https://example.test/api/v1/deviceToken/poll",
     };
-    const svc = new QoderService({ profile: alt });
+    const svc = new QoderService({ profile: alt, machineTokenResolver: async (id) => id });
     const flow = await svc.initiateDeviceFlow();
     expect(flow.verificationUriComplete.startsWith(alt.loginUrl)).toBe(true);
     expect(svc.profile.deviceTokenUrl).toBe(alt.deviceTokenUrl);
   });
 
   it("default OAuth service stays on intl hosts", async () => {
-    const svc = new QoderService();
+    const svc = new QoderService({ machineTokenResolver: async (id) => id });
     const flow = await svc.initiateDeviceFlow();
     expect(flow.verificationUriComplete.startsWith(INTL_PROFILE.loginUrl)).toBe(true);
   });
@@ -918,6 +979,24 @@ describe("field-ops pipeline (capabilities → applyThinking → body)", () => {
     expect(payload.parameters.reasoning_effort).toBe("max");
   });
 
+  it("keeps max in Qoder format for QoderWork", async () => {
+    expect(PROVIDERS["qoderwork-cn"].thinkingFormat).toBeUndefined();
+    const body = {
+      messages: [{ role: "user", content: "think" }],
+      reasoning_effort: "max",
+      max_tokens: 256,
+    };
+    applyThinking("qoder", "qmodel_latest", body, "qoderwork-cn");
+    const { payload } = await buildQoderRequestBody({
+      model: "qmodel_latest",
+      body,
+      credentials,
+      modelConfig: fakeModelConfig,
+      profile: "cn-work",
+    });
+    expect(payload.parameters.reasoning_effort).toBe("max");
+  });
+
   it("forwards max_thinking_tokens verbatim into parameters", async () => {
     const { payload } = await buildQoderRequestBody({
       model: "qmodel_latest",
@@ -1017,41 +1096,36 @@ describe("wrapQoderSSE special tokens", () => {
 
 describe("qoderwork-cn refresh + executor", () => {
   it("CN device login URL includes client_id", async () => {
-    const flow = await new QoderService({ profile: "cn-work" }).initiateDeviceFlow();
+    const flow = await new QoderService({
+      profile: "cn-work",
+      machineTokenResolver: async (id) => id,
+    }).initiateDeviceFlow();
     expect(flow.verificationUriComplete).toContain("client_id=");
     expect(flow.verificationUriComplete).toContain("qoder.com.cn");
   });
 
   it("refreshQoderDeviceToken maps device_token response", async () => {
-    const prev = globalThis.fetch;
-    globalThis.fetch = async () =>
+    refreshFetchMock.mockResolvedValue(
       new Response(
         JSON.stringify({ device_token: "dt-x", refresh_token: "rt-x", expires_in: 120 }),
         { status: 200, headers: { "Content-Type": "application/json" } },
-      );
-    try {
-      const r = await refreshQoderDeviceToken("rt-success-unique", "cn-work");
-      expect(r.accessToken).toBe("dt-x");
-      expect(r.refreshToken).toBe("rt-x");
-      expect(r.expiresIn).toBeGreaterThanOrEqual(60);
-    } finally {
-      globalThis.fetch = prev;
-    }
+      ),
+    );
+    const r = await refreshQoderDeviceToken("rt-success-unique", "cn-work");
+    expect(r.accessToken).toBe("dt-x");
+    expect(r.refreshToken).toBe("rt-x");
+    expect(r.expiresIn).toBeGreaterThanOrEqual(60);
   });
 
   it("refresh invalid_grant on 401", async () => {
-    const prev = globalThis.fetch;
-    globalThis.fetch = async () =>
+    refreshFetchMock.mockResolvedValue(
       new Response(JSON.stringify({ message: "nope" }), {
         status: 401,
         headers: { "Content-Type": "application/json" },
-      });
-    try {
-      const r = await refreshQoderDeviceToken("rt-fail-401", "cn-work");
-      expect(r?.error).toBe("invalid_grant");
-    } finally {
-      globalThis.fetch = prev;
-    }
+      }),
+    );
+    const r = await refreshQoderDeviceToken("rt-fail-401", "cn-work");
+    expect(r?.error).toBe("invalid_grant");
   });
 
   it("QoderExecutor for qoderwork-cn uses cn-work profile and can need refresh", () => {
@@ -1059,11 +1133,37 @@ describe("qoderwork-cn refresh + executor", () => {
     expect(ex.getProtocolProfile()).toBe("cn-work");
     expect(ex.needsRefresh({ expiresAt: Date.now() - 1000, refreshToken: "rt" })).toBe(true);
   });
+
+  it("persists both machine fields in Qoder OAuth adapters with legacy fallback", () => {
+    for (const adapter of [qoderOAuth, qoderworkCnOAuth]) {
+      const mapped = adapter.mapTokens({
+        access_token: "dt-x",
+        expires_in: 60,
+        _qoderUserId: "u1",
+        _qoderMachineId: "uuid-1",
+        _qoderMachineToken: "umid-1",
+      });
+      expect(mapped.providerSpecificData).toMatchObject({
+        machineId: "uuid-1",
+        machineToken: "umid-1",
+      });
+      const legacy = adapter.mapTokens({
+        access_token: "dt-x",
+        expires_in: 60,
+        _qoderUserId: "u1",
+        _qoderMachineId: "uuid-1",
+      });
+      expect(legacy.providerSpecificData.machineToken).toBe("uuid-1");
+    }
+  });
 });
 
 describe("cn-work device login URL", () => {
   it("includes client_id and redirect_uri like desktop", async () => {
-    const flow = await new QoderService({ profile: "cn-work" }).initiateDeviceFlow();
+    const flow = await new QoderService({
+      profile: "cn-work",
+      machineTokenResolver: async (id) => id,
+    }).initiateDeviceFlow();
     const u = new URL(flow.verificationUriComplete);
     expect(u.origin + u.pathname).toBe("https://qoder.com.cn/device/selectAccounts");
     expect(u.searchParams.get("client_id")).toBe("1c5e33e1-364d-4ce6-b02c-acaa81274a5c");

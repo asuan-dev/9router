@@ -1,13 +1,9 @@
 /**
  * CodeBuddy CN chat wire constants.
  *
- * Upstream is OpenAI-shaped Chat Completions, but this proxy is **minimal**:
- * only fields the official CLI / common chat path need. Hub Chat baseline
- * (axonhub openai-chat-completions-protocol.md) documents the full OpenAI
- * create surface — we do **not** re-emit the full surface to CodeBuddy
- * (store/metadata/stream_options/etc. would mark us as a passthrough proxy).
- *
- * Evidence: lab/workbuddy unpack; #2071; PRD 07-24-codebuddy-cn-protocol-parity.
+ * The gateway is OpenAI-shaped, but the CN transport intentionally forwards
+ * only fields verified for its chat contract. Unsupported passthrough fields
+ * remain stripped at the protocol boundary.
  */
 
 /** Top-level fields forwarded when present. */

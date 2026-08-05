@@ -1,21 +1,12 @@
-// CodeBuddy CN (WorkBuddy) model discovery + capability extraction.
+// CodeBuddy CN model discovery + capability extraction.
 //
-// WHY A SERVICE MODULE: the API route (models/route.js) used to inline the
-// fetch, UA, CLI-agent filter, and caps mapping. That puts endpoint protocol
-// in the Next route layer and forces every new provider to edit the route.
-// This module owns the upstream contract; the route just calls it.
-//
-// Upstream shape (unpacked from WorkBuddy client 5.3.3 initialize.js getModels):
-//   GET https://copilot.tencent.com/console/enterprises/{eid}/models
-//   Bearer auth, UA "CodeBuddy/5.3.3" required (else code 12403).
-//   data.data.models[] with supportsImages / supportsToolCall /
-//   supportsReasoning / maxInputTokens / maxOutputTokens.
-//
-// `publishDiscoveredCaps` in the route publishes these to the live overlay +
-// persists them for boot re-hydration.
+// This service owns the upstream response contract while the provider registry
+// owns transport endpoints and headers. The route only publishes the resulting
+// model and capability projections.
 
-const CODEBUDDY_MODELS_BASE = "https://copilot.tencent.com";
-const CODEBUDDY_UA = "CodeBuddy/5.3.3";
+import { PROVIDERS } from "../providers/index.js";
+
+const PROVIDER_ID = "codebuddy-cn";
 
 /**
  * Map one raw CodeBuddy model into a capability patch.
@@ -40,18 +31,19 @@ export async function resolveCodebuddyCnModels(connection) {
   const token = connection.accessToken;
   if (!token) return { error: "No access token", status: 401 };
 
+  const config = PROVIDERS[PROVIDER_ID]?.modelDiscovery;
+  if (!config?.urlTemplate) return { error: "Model discovery not configured", status: 500 };
+
   const eid = connection.providerSpecificData?.enterpriseId || "personal";
-  const url = `${CODEBUDDY_MODELS_BASE}/console/enterprises/${eid}/models`;
+  const url = config.urlTemplate.replace("{enterpriseId}", eid);
 
   let response;
   try {
     response = await fetch(url, {
       method: "GET",
       headers: {
+        ...(config.headers || {}),
         Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-        "User-Agent": CODEBUDDY_UA,
-        "X-Requested-With": "XMLHttpRequest",
       },
     });
   } catch (e) {

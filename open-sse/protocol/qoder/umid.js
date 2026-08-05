@@ -260,13 +260,6 @@ export async function getUmidInfo(opts = {}) {
   return inflight;
 }
 
-/**
- * Generate a random UUID v4 for use as a fake IOPlatformUUID.
- * @returns {string}
- */
-export function generateMachineUuid() {
-  return crypto.randomUUID();
-}
 
 /**
  * Cached fetch of a UMID for a specific (fake) machine UUID.
@@ -310,18 +303,6 @@ export function getCachedMachineToken() {
   return (cache && cache.machineToken) || "";
 }
 
-/**
- * Sync peek of full cached info (or null).
- * @returns {UmidInfo | null}
- */
-export function getCachedUmidInfo() {
-  return cache || null;
-}
-
-/** Fire-and-forget warm-up for app boot. */
-export function warmUmid() {
-  getUmidInfo().catch(() => {});
-}
 
 /** @internal */
 export function _resetUmidCacheForTest() {

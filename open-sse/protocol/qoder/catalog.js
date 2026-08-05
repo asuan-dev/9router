@@ -53,6 +53,7 @@ function cosyCredsFromConnection(credentials) {
     name: credentials.displayName || "",
     email: credentials.email || "",
     machineId: psd.machineId || "",
+    machineToken: psd.machineToken || psd.machineId || "",
   };
 }
 

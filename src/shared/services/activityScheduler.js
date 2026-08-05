@@ -18,6 +18,8 @@ import { getProviderConnections, getProviderConnectionById, updateProviderConnec
 import { getActivityProvider, getCheckinProviderIds } from "open-sse/services/activities/registry.js";
 import { refreshAndUpdateCredentials } from "@/app/api/usage/[connectionId]/route.js";
 import { EventEmitter } from "events";
+import { dayKeyInTimeZone } from "@/shared/utils/timezone";
+import { dbg } from "open-sse/utils/debugLog.js";
 
 const LOG = "AUTO_CHECKIN";
 
@@ -44,17 +46,6 @@ if (!g.emitter) {
 /** Event bus: emits "checkin" with { connectionId, provider, result } after each attempt. */
 export const checkinEmitter = g.emitter;
 
-// --- Timezone helpers ---
-
-/** Calendar day key (YYYY-MM-DD) in a given IANA timezone. */
-function dayKeyInTz(timezone, date = new Date()) {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: timezone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(date);
-}
 
 /** Get UTC offset minutes for a timezone at a given date. */
 function tzOffsetMs(timezone, date = new Date()) {
@@ -103,7 +94,7 @@ async function persistState(connectionId, patch, notify = false, provider = null
 
 async function runOneConnection(conn, provider, nowMs = Date.now()) {
   const timezone = provider.timezone || "Asia/Shanghai";
-  const dayKey = dayKeyInTz(timezone, new Date(nowMs));
+  const dayKey = dayKeyInTimeZone(timezone, new Date(nowMs));
   const psd = conn.providerSpecificData || {};
 
   // Already done today → skip
@@ -132,8 +123,8 @@ async function runOneConnection(conn, provider, nowMs = Date.now()) {
   try {
     const r = await refreshAndUpdateCredentials(connection, false, null);
     if (r?.connection) connection = r.connection;
-  } catch (e) {
-    console.warn(`[${LOG}] refresh ${conn.id}: ${e.message}`);
+  } catch {
+    console.warn(`[${LOG}] credential refresh failed for connection ${conn.id}`);
   }
 
   // Resolve auth
@@ -209,16 +200,16 @@ export async function runAutoCheckinTick() {
       for (let i = 0; i < targets.length; i++) {
         try {
           await runOneConnection(targets[i], provider);
-        } catch (e) {
-          console.warn(`[${LOG}] ${providerId}/${targets[i].id}: ${e.message}`);
+        } catch {
+          console.warn(`[${LOG}] check-in failed for ${providerId}/${targets[i].id}`);
         }
         if (i < targets.length - 1 && CONFIG.betweenAccountsMs > 0) {
           await new Promise((r) => setTimeout(r, CONFIG.betweenAccountsMs));
         }
       }
     }
-  } catch (e) {
-    console.warn(`[${LOG}] tick error:`, e.message);
+  } catch {
+    console.warn(`[${LOG}] scheduler tick failed`);
   } finally {
     g.running = false;
   }
@@ -228,7 +219,7 @@ export async function runAutoCheckinTick() {
 
 export function startAutoCheckin() {
   if (g.interval) return;
-  console.log(`[${LOG}] scheduler started (providers: ${getCheckinProviderIds().join(", ")})`);
+  dbg(LOG, `scheduler started (providers: ${getCheckinProviderIds().join(", ")})`);
   runAutoCheckinTick().catch(() => {});
   g.interval = setInterval(() => {
     runAutoCheckinTick().catch(() => {});
@@ -240,7 +231,7 @@ export function stopAutoCheckin() {
   if (!g.interval) return;
   clearInterval(g.interval);
   g.interval = null;
-  console.log(`[${LOG}] scheduler stopped`);
+  dbg(LOG, "scheduler stopped");
 }
 
 /** Check if any connection has autoCheckin enabled (used at app startup). */
@@ -276,7 +267,7 @@ export async function manualCheckin(connectionId) {
   const result = await provider.checkin.claim(conn, null);
   if (result.ok) {
     const timezone = provider.timezone || "Asia/Shanghai";
-    const dayKey = dayKeyInTz(timezone);
+    const dayKey = dayKeyInTimeZone(timezone);
     await persistState(connectionId, {
       autoCheckinDoneDay: dayKey,
       autoCheckinLastResult: result.already ? "already" : "success",

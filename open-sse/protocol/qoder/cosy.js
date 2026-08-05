@@ -104,6 +104,7 @@ export function generateMachineId() {
  * @param {string} [creds.name]            Display name (optional).
  * @param {string} [creds.email]           Email (optional, can be empty).
  * @param {string} [creds.machineId]       Persisted machine UUID.
+ * @param {string} [creds.machineToken]    SecurityGuard UMID; falls back to machineId.
  * @param {import("./profile.js").QoderProfile|string|null} [profile]
  * @returns {Record<string, string>} Header map ready to merge onto fetch().
  */
@@ -148,6 +149,7 @@ export function buildCosyHeaders(body, requestUrl, creds, profile = null) {
   const sig = md5Hex(Buffer.from(sigInput, "latin1"));
 
   const machineId = creds.machineId || generateMachineId();
+  const machineToken = creds.machineToken || machineId;
   const bodyHash = md5Hex(bodyBuf);
   const bodyLength = String(bodyBuf.length);
 
@@ -158,7 +160,7 @@ export function buildCosyHeaders(body, requestUrl, creds, profile = null) {
     "Cosy-Date": timestamp,
     "Cosy-Version": p.ideVersion,
     "Cosy-Machineid": machineId,
-    "Cosy-Machinetoken": machineId,
+    "Cosy-Machinetoken": machineToken,
     "Cosy-Machinetype": p.machineType,
     "Cosy-Machineos": p.machineOs,
     "Cosy-Clienttype": p.clientType,

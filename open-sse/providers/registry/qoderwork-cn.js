@@ -20,10 +20,6 @@ export default {
       "https://gateway.qoder.com.cn/algo/api/v2/service/pro/sse/agent_chat_generation",
     headers: {},
     timeoutMs: 120000,
-    stallTimeoutMs: 120000,
-    // Same thinking path as codebuddy-cn / openai-compatible effort.
-    thinkingFormat: "openai",
-    protocolProfile: "cn-work",
     usage: {
       url: "https://openapi.qoder.com.cn/api/v2/quota/usage",
     },
@@ -49,10 +45,11 @@ export default {
     loginUrl: "https://qoder.com.cn/device/selectAccounts",
     clientId: "1c5e33e1-364d-4ce6-b02c-acaa81274a5c",
     redirectUri: "qoder-work-cn://",
-    protocolProfile: "cn-work",
   },
   features: {
     usage: true,
+    checkin: true,
+    profileRefresh: true,
   },
   protocolProfile: "cn-work",
 };
