@@ -8,6 +8,7 @@ import { getModelsByProviderId } from "open-sse/config/providerModels.js";
 import { resolveKiroModels } from "open-sse/services/kiroModels.js";
 import { resolveKimchiModels } from "open-sse/services/kimchiModels.js";
 import { resolveQoderModels } from "open-sse/services/qoderModels.js";
+import { resolveAccioModels } from "open-sse/services/accioModels.js";
 import { resolveGrokCliModels } from "open-sse/services/grokCliModels.js";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { resolveCodebuddyCnModels, mapCodebuddyCnCaps } from "open-sse/services/codebuddyCnModels.js";
@@ -191,7 +192,7 @@ async function publishDiscoveredCaps(provider, rawModels, mapCaps) {
     } catch (e) {
       // Persist failed: publish to memory anyway so the current process still
       // benefits, but log loudly — it won't survive restart.
-      console.error(`[discovery] persist ${provider} failed, overlay NOT persisted:`, e?.message);
+      console.warn(`[discovery] Failed to persist ${provider} capabilities; using an in-memory overlay:`, e?.message);
       setLiveCapabilities(provider, capsByModel, { fetchedAt, persistFailed: true });
     }
   }
@@ -481,6 +482,41 @@ const PROVIDER_MODELS_CONFIG = {
       } catch (error) {
         warning = `Failed to fetch QoderWork CN models: ${error.message}`;
         console.log("Failed to fetch QoderWork CN models dynamically, falling back to static:", error.message);
+      }
+      return { models: [], warning };
+    },
+  },
+  accio: {
+    customResolver: async (connection) => {
+      const credentials = {
+        accessToken: connection.accessToken,
+        refreshToken: connection.refreshToken,
+        email: connection.email,
+        displayName: connection.displayName,
+        providerSpecificData: connection.providerSpecificData || {},
+      };
+      let warning;
+      try {
+        const result = await resolveAccioModels(credentials, { forceRefresh: true });
+        if (result?.models?.length) {
+          // Accio surfaces the same cap fields as the Qoder catalog.
+          await publishDiscoveredCaps("accio", result.models, mapQoderCaps);
+          return {
+            models: result.models.map((m) => ({
+              id: `accio/${m.id}`,
+              name: m.name,
+              contextLength: m.contextLength,
+              isVL: m.isVL,
+              isReasoning: m.isReasoning,
+              maxOutputTokens: m.maxOutputTokens,
+              description: m.description,
+            })),
+          };
+        }
+        warning = "Accio returned no models; falling back to static catalog.";
+      } catch (error) {
+        warning = `Failed to fetch Accio models: ${error.message}`;
+        console.log("Failed to fetch Accio models dynamically, falling back to static:", error.message);
       }
       return { models: [], warning };
     },

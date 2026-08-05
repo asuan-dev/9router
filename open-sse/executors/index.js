@@ -26,6 +26,7 @@ import ZedExecutor from "./zed.js";
 import WindsurfExecutor from "./windsurf.js";
 import { DefaultExecutor } from "./default.js";
 import { DevinCliExecutor } from "./devin-cli.js";
+import { AccioExecutor } from "./accio.js";
 
 const executors = {
   antigravity: new AntigravityExecutor(),
@@ -35,6 +36,7 @@ const executors = {
   iflow: new IFlowExecutor(),
   qoder: new QoderExecutor("qoder"),
   "qoderwork-cn": new QoderExecutor("qoderwork-cn"),
+  accio: new AccioExecutor(),
   kiro: new KiroExecutor(),
   kimchi: new KimchiExecutor(),
   codex: new CodexExecutor(),
@@ -104,3 +106,4 @@ export { default as TraeExecutor } from "./trae.js";
 export { default as ZedExecutor } from "./zed.js";
 export { default as WindsurfExecutor } from "./windsurf.js";
 export { DevinCliExecutor } from "./devin-cli.js";
+export { AccioExecutor } from "./accio.js";

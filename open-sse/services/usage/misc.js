@@ -1,10 +1,11 @@
 /**
- * Misc usage handlers (Qwen, iFlow, Ollama, GLM, Vercel AI Gateway, Qoder)
+ * Misc usage handlers (Qwen, iFlow, Ollama, GLM, Vercel AI Gateway, Qoder, Accio)
  */
 
 import { proxyAwareFetch } from "../../utils/proxyFetch.js";
 import { U } from "./shared.js";
 import { getQuota } from "../../protocol/qoder/index.js";
+import { getQuota as getAccioQuota } from "../../protocol/accio/index.js";
 
 // GLM quota endpoints (region-aware) — url from registry transport.usage
 const GLM_QUOTA_URLS = {
@@ -209,4 +210,14 @@ export async function getVercelAiGatewayUsage(apiKey, proxyOptions = null) {
 
 export async function getQoderUsage(accessToken, proxyOptions = null, profile = null) {
   return getQuota(accessToken, { proxyOptions, profile });
+}
+
+/**
+ * Accio Work quota — plan + credit balances from currentSubscription.
+ * @param {string} accessToken
+ * @param {object|null} [proxyOptions]
+ * @param {any} [profile]
+ */
+export async function getAccioUsage(accessToken, proxyOptions = null, profile = null) {
+  return getAccioQuota(accessToken, { proxyOptions, profile });
 }

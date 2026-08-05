@@ -569,6 +569,53 @@ export async function refreshQoderDeviceToken(refreshToken, profileId = "intl", 
   }, log);
 }
 
+/**
+ * Accio Work — POST gateway /api/auth/refresh_token
+ * { accessToken, refreshToken } → { accessToken, refreshToken, expiresAt }
+ *
+ * The gateway wants the current (possibly expired) access token alongside the
+ * refresh token; sending the refresh token alone is rejected.
+ *
+ * @param {string} refreshToken
+ * @param {string} [profileId] - protocol profile id ("prod")
+ * @param {object} [log]
+ * @param {string} [accessToken] - current access token, when available
+ */
+export async function refreshAccioToken(refreshToken, profileId = "prod", log, accessToken = "") {
+  if (!refreshToken) return null;
+  return dedupRefresh(`accio:${profileId || "prod"}`, refreshToken, async () => {
+    try {
+      const mod = await import("../../../src/lib/oauth/services/accio.js");
+      const svc = new mod.AccioService({ profile: profileId });
+      const tokens = await svc.refreshAccessToken(refreshToken, accessToken);
+      log?.info?.("TOKEN_REFRESH", "Successfully refreshed Accio token", {
+        profile: profileId,
+        hasNewAccessToken: !!tokens.accessToken,
+        hasNewRefreshToken: !!tokens.refreshToken,
+        expiresIn: tokens.expiresIn,
+      });
+      return {
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken || refreshToken,
+        expiresIn: tokens.expiresIn,
+      };
+    } catch (e) {
+      const status = e?.status;
+      log?.error?.("TOKEN_REFRESH", `Accio refresh failed (${profileId})`, {
+        error: e?.message || String(e),
+        status,
+      });
+      if (status === 401 || status === 403) {
+        return {
+          error: "invalid_grant",
+          message: e?.message || "Accio refresh rejected",
+        };
+      }
+      return null;
+    }
+  }, log);
+}
+
 export async function refreshCodebuddyIntlToken(refreshToken, log) {
   if (!refreshToken) return null;
   return dedupRefresh("codebuddy-intl", refreshToken, async () => {

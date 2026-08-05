@@ -28,6 +28,7 @@ import kimchi from "./kimchi.js";
 import trae from "./trae.js";
 import windsurf from "./windsurf.js";
 import zed from "./zed.js";
+import accio from "./accio.js";
 
 // Provider configurations
 const PROVIDERS = {
@@ -40,6 +41,7 @@ const PROVIDERS = {
   iflow,
   qoder,
   "qoderwork-cn": qoderworkCn,
+  accio,
   qwen,
   github,
   kiro,

@@ -38,6 +38,11 @@ export const QWEN_CONFIG = { ...PROVIDER_OAUTH["qwen"] };
 export const QODER_CONFIG = { ...PROVIDER_OAUTH["qoder"] };
 export const QODERWORK_CN_CONFIG = { ...PROVIDER_OAUTH["qoderwork-cn"] };
 
+// Accio Work OAuth Configuration (Authorization Code Flow with PKCE).
+// Login page takes `return_url` (not `redirect_uri`); token exchange and
+// refresh are gateway POSTs whose JSON body carries the credential.
+export const ACCIO_CONFIG = { ...PROVIDER_OAUTH["accio"] };
+
 // iFlow OAuth Configuration (Authorization Code)
 export const IFLOW_CONFIG = { ...PROVIDER_OAUTH["iflow"] };
 

@@ -21,6 +21,7 @@ import {
   getGlmUsage,
   getVercelAiGatewayUsage,
   getQoderUsage,
+  getAccioUsage,
 } from "./usage/misc.js";
 
 /**
@@ -38,6 +39,7 @@ const USAGE_HANDLERS = {
   kiro: (c) => getKiroUsage(c.accessToken, c.providerSpecificData, c.proxyOptions),
   qoder: (c) => getQoderUsage(c.accessToken, c.proxyOptions, "intl"),
   "qoderwork-cn": (c) => getQoderUsage(c.accessToken, c.proxyOptions, "cn-work"),
+  accio: (c) => getAccioUsage(c.accessToken, c.proxyOptions, "prod"),
   qwen: (c) => getQwenUsage(c.accessToken, c.providerSpecificData),
   iflow: (c) => getIflowUsage(c.accessToken),
   ollama: (c) => getOllamaUsage(c.accessToken),
