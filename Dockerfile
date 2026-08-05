@@ -4,12 +4,13 @@ FROM ${NODE_IMAGE} AS base
 WORKDIR /app
 
 FROM base AS builder
+ARG NPM_REGISTRY=https://registry.npmjs.org
 
 RUN apk --no-cache upgrade && apk --no-cache add python3 make g++ linux-headers
 
 COPY package.json ./
 RUN --mount=type=cache,target=/root/.npm \
-  npm install --registry=https://registry.npmmirror.com
+  npm install --registry="${NPM_REGISTRY}"
 
 COPY . ./
 ENV NEXT_TELEMETRY_DISABLED=1

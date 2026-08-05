@@ -16,7 +16,7 @@ Provider-agnostic SSE engine: one OpenAI-style request → any provider (LLM cha
 - `rtk/` — request token-killer. `index.js` compresses `tool_result` content in-place (OpenAI/Claude/Kiro shapes); `filters/` per-tool compressors + `autodetect.js`; `headroom.js` external compress proxy; `caveman.js` system-prompt injector.
 - `transformer/` — `responsesTransformer.js` (Chat Completions SSE → Codex Responses API SSE), `streamToJsonConverter.js`.
 - `shared/` — cross-provider auth/identity: `clineAuth.js`, `machineId.js`.
-- `protocol/codebuddy/` — CodeBuddy CN **minimal** OpenAI Chat allowlist + SSE dirt normalize (no private shell). Public: `sanitizeChatBody` / `normalizeChatChunk`.
+- `protocol/codebuddy/` — CodeBuddy **minimal** OpenAI Chat allowlist + SSE dirt normalize (no private shell). Public: `sanitizeChatBody` / `createSseNormalizeTransform`.
 - `protocol/qoder/` — Qoder protocol **deep module** (contract: repo `lab/qodercli/README.md` + `lab/qodercli/docs/field-ops-chat-to-qoder.md`) (Cosy, encode, chat body/SSE, catalog, quota, profiles). Public surface: `chat` / catalog / `getQuota` / `resolveProfile` / `createProtocol`. Internals for tests: `test-utils.js`. Region/product is Profile data (**intl only** in production; CN = add Profile later, no fork).
 - `services/` — `model.js`, `provider.js`, `accountFallback.js`, `combo.js`, `compact.js`, `tokenRefresh/`+`tokenRefresh.js`, `oauthCredentialManager.js`, `usage/`, `projectId.js`, `kiroModels.js`/`qoderModels.js`, `activities/` (e.g. codebuddy-cn check-in — **not** inside protocol chat).
 - OAuth for Qoder lives in `src/lib/oauth/services/qoder.js` (credentials only; URLs from protocol Profile).
@@ -37,6 +37,6 @@ Provider-agnostic SSE engine: one OpenAI-style request → any provider (LLM cha
 ## Pitfalls
 
 - OpenAI bridge is lossy (thinking, non-base64 images, tool ids, is_error) — prefer a direct route for fragile pairs.
-- `registry/index.js` is an auto-generated static import list; regenerate it (don't hand-edit) after adding a `registry/{id}.js`. REGISTRY_TEMPLATE is excluded by design.
+- `registry/index.js` is an auto-generated static import list; run `npm run generate:provider-registry` after adding a `registry/{id}.js` (or `npm run check:provider-registry` to verify it). Do not hand-edit the index; the generator documents intentionally excluded entries.
 - Special binary/protobuf formats (kiro EventStream, cursor protobuf, commandcode NDJSON) don't round-trip through OpenAI — handle in their executor.
 - `rtk/` + `headroom.js` mutate the request body in-place and are **fail-open**: any error returns null and leaves the body untouched — never throw out of them. RTK skips `is_error`/`status:"error"` tool results to preserve traces.
